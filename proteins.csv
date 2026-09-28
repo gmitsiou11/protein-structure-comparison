@@ -1,0 +1,74 @@
+protein_name,uniprot_id,pdb_xray,pdb_nmr,pdb_cryoem,chain_id,chain_id_af2,nmr_model,notes
+Barnase,P00648,6PQK,1BNR,,A,,0,Added automatically via RCSB search. X-ray res: 1.2. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Protein G (GB1 domain parent),P06654,1IGD,1GB1,9G4T,A,,0,Added automatically via RCSB search. X-ray res: 1.1. Cryo-EM res: 2.51. Review chain_id and nmr_model before running pipeline.
+Adenylate kinase (E. coli),P69441,7APU,,,A,,,Added automatically via RCSB search. X-ray res: 1.36. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+T4 lysozyme,P00720,2O7A,2LC9,8DCS,A,,0,Added automatically via RCSB search. X-ray res: 0.84. Cryo-EM res: 2.5. Review chain_id and nmr_model before running pipeline.
+Myoglobin,P02185,5YCE,1MYF,,A,,0,Added automatically via RCSB search. X-ray res: 0.77. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Lysozyme C (human),P61626,2NWD,1IY3,8QUT,X,,0,Added automatically via RCSB search. X-ray res: 1.04. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
+Ribonuclease A,P61823,6ETK,2AAS,,A,,0,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+BPTI (aprotinin),P00974,1G6X,1JV8,,A,,0,Added automatically via RCSB search. X-ray res: 0.86. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+HIV-1 protease,P03366,2HS1,1Q3Y,8VBH,A,,0,Added automatically via RCSB search. X-ray res: 0.84. Cryo-EM res: 2.2. Review chain_id and nmr_model before running pipeline.
+Dihydrofolate reductase (E. coli),P0ABQ4,9PWM,,8V9R,A,,,Added automatically via RCSB search. X-ray res: 0.89. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
+Thioredoxin (E. coli),P0AA25,4HUA,1XOA,9JFS,A,,0,Added automatically via RCSB search. X-ray res: 1.1. Cryo-EM res: 2.67. Review chain_id and nmr_model before running pipeline.
+CheY response regulator,P0AE67,1JBE,1CEY,,A,,0,Added automatically via RCSB search. X-ray res: 1.08. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+HRas GTPase,P01112,2CE2,1AA9,,X,,0,Added automatically via RCSB search. X-ray res: 1.0. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Calmodulin,P0DP23,9MXD,1J7O,9J38,A,,0,Added automatically via RCSB search. X-ray res: 1.17. Cryo-EM res: 2.4. Review chain_id and nmr_model before running pipeline.
+Cyclophilin A,P62937,9E3S,1OCA,7UPN,C,,0,Added automatically via RCSB search. X-ray res: 1.08. Cryo-EM res: 3.5. Review chain_id and nmr_model before running pipeline.
+FKBP12,P62942,2PPN,1F40,8JCU,A,,0,Added automatically via RCSB search. X-ray res: 0.92. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
+Green fluorescent protein,P42212,6L27,,9SDL,A,,,Added automatically via RCSB search. X-ray res: 0.77. Cryo-EM res: 2.42. Review chain_id and nmr_model before running pipeline.
+Staphylococcal nuclease,P00644,4EQP,1JOK,,A,,0,Added automatically via RCSB search. X-ray res: 1.35. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+TEM-1 beta-lactamase,P62593,1M40,,,A,,,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Cytochrome c,P99999,5TY3,1J3S,,A,,0,Added automatically via RCSB search. X-ray res: 1.25. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Carbonic anhydrase II (human),P00918,3K34,6HD2,,A,,0,Added automatically via RCSB search. X-ray res: 0.9. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Superoxide dismutase 1 (human),P00441,4A7U,1BA9,9IYJ,A,,0,Added automatically via RCSB search. X-ray res: 0.98. Cryo-EM res: 2.92. Review chain_id and nmr_model before running pipeline.
+Transthyretin,P02766,1F86,2NBO,8PKF,A,,0,Added automatically via RCSB search. X-ray res: 1.1. Cryo-EM res: 2.3673. Review chain_id and nmr_model before running pipeline.
+Beta-2-microglobulin,P61769,4E0K,1JNJ,6LA6,A,,0,Added automatically via RCSB search. X-ray res: 0.97. Cryo-EM res: 2.39. Review chain_id and nmr_model before running pipeline.
+Tumor protein p53,P04637,9C5S,1A1U,8OXO,A,,0,Added automatically via RCSB search. X-ray res: 1.01. Cryo-EM res: 3.0. Review chain_id and nmr_model before running pipeline.
+Actin (beta),P60709,6MBK,,9QEW,Y,,,Added automatically via RCSB search. X-ray res: 1.69. Cryo-EM res: 2.18. Review chain_id and nmr_model before running pipeline.
+Tubulin beta chain,P07437,3QNZ,,8BPO,C,,,Added automatically via RCSB search. X-ray res: 2.2. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
+Hsp90-alpha,P07900,6TN5,2BUG,7KRJ,AAA,,0,Added automatically via RCSB search. X-ray res: 1.165. Cryo-EM res: 2.56. Review chain_id and nmr_model before running pipeline.
+GroEL chaperonin,P0A6F5,3VZ6,,8BKZ,A,,,Added automatically via RCSB search. X-ray res: 1.5. Cryo-EM res: 2.3. Review chain_id and nmr_model before running pipeline.
+ClpP protease,P0A7K2,1CTF,1RQS,7N2C,A,,0,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.72. Review chain_id and nmr_model before running pipeline.
+RNA polymerase II subunit RPB1,P24928,6G0R,2LTO,8PNP,C,,0,Added automatically via RCSB search. X-ray res: 1.25. Cryo-EM res: 2.49. Review chain_id and nmr_model before running pipeline.
+DNA-dependent protein kinase catalytic subunit,P78527,,,7Z87,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.91. Review chain_id and nmr_model before running pipeline.
+Kinesin-1 (KIF5B),Q12840,,,9T17,C,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.77. Review chain_id and nmr_model before running pipeline.
+Dynein heavy chain,Q14204,5OWO,,9BLZ,A,,,Added automatically via RCSB search. X-ray res: 1.79. Cryo-EM res: 2.2. Review chain_id and nmr_model before running pipeline.
+Beta-2 adrenergic receptor,P07550,1GQ4,6KR8,9U4Y,A,,0,Added automatically via RCSB search. X-ray res: 1.9. Cryo-EM res: 2.67. Review chain_id and nmr_model before running pipeline.
+TRPV1 ion channel,Q8NER1,,,8GFA,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.29. Review chain_id and nmr_model before running pipeline.
+CFTR (ABCC7),P13569,2PZE,2LOB,9MXL,A,,0,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.1. Review chain_id and nmr_model before running pipeline.
+SARS-CoV-2 spike glycoprotein,P0DTC2,7Z8O,7LC8,9GXG,A,,0,Added automatically via RCSB search. X-ray res: 0.96. Cryo-EM res: 1.92. Review chain_id and nmr_model before running pipeline.
+HIV-1 envelope glycoprotein gp160,P04578,8F3A,1MZI,,A,,0,Added automatically via RCSB search. X-ray res: 1.2. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Alpha-synuclein,P37840,8JJV,1XQ8,9EUU,B,,0,Added automatically via RCSB search. X-ray res: 1.23. Cryo-EM res: 1.93. Review chain_id and nmr_model before running pipeline.
+Tau protein,P10636,6ODG,1I8H,8Q98,A,,0,Added automatically via RCSB search. X-ray res: 1.0. Cryo-EM res: 1.75. Review chain_id and nmr_model before running pipeline.
+Prion protein (PrP),P04156,2OL9,1E1G,6LNI,A,,0,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: 2.702. Review chain_id and nmr_model before running pipeline.
+Amyloid beta precursor protein (APP),P05067,2FMA,1AMB,8BG0,A,,0,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: 1.99. Review chain_id and nmr_model before running pipeline.
+p27 Kip1,P46527,7OR8,,8BYA,P,,,Added automatically via RCSB search. X-ray res: 1.8. Cryo-EM res: 3.38. Review chain_id and nmr_model before running pipeline.
+c-Myc,P01106,9QNH,1A93,8OTS,P,,0,Added automatically via RCSB search. X-ray res: 1.3. Cryo-EM res: 3.3. Review chain_id and nmr_model before running pipeline.
+CREB-binding protein (CBP),Q92793,5I86,1JSP,7TBH,A,,0,Added automatically via RCSB search. X-ray res: 1.05. Cryo-EM res: 2.3. Review chain_id and nmr_model before running pipeline.
+Ankyrin-1,P16157,2YVI,2YQF,7UZQ,A,,0,Added automatically via RCSB search. X-ray res: 1.92. Cryo-EM res: 2.17. Review chain_id and nmr_model before running pipeline.
+Toll-like receptor 4 (TLR4),O00206,2Z62,5NAM,8WO1,A,,0,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.24. Review chain_id and nmr_model before running pipeline.
+Collagen alpha-1(I) chain,P02452,5CTD,2LLP,7E7B,A,,0,Added automatically via RCSB search. X-ray res: 1.5991. Cryo-EM res: 2.6. Review chain_id and nmr_model before running pipeline.
+Spectrin alpha chain,P02549,5J4O,1OWA,,A,,0,Added automatically via RCSB search. X-ray res: 1.54. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Fibrinogen gamma chain,P02679,9KHB,,,A,,,Added automatically via RCSB search. X-ray res: 1.03. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Hemoglobin subunit beta,P68871,2W72,2H35,8WJ0,B,,0,Added automatically via RCSB search. X-ray res: 1.07. Cryo-EM res: 2.24. Review chain_id and nmr_model before running pipeline.
+Lactate dehydrogenase A,P00338,5W8J,,,A,,,Added automatically via RCSB search. X-ray res: 1.55. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Beta-catenin,P35222,3FQN,2G57,,C,,0,Added automatically via RCSB search. X-ray res: 1.65. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Importin alpha-1,P52294,2JDQ,,,A,,,Added automatically via RCSB search. X-ray res: 2.2. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Vimentin,P08670,1GK7,,,A,,,Added automatically via RCSB search. X-ray res: 1.4. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Ferritin heavy chain,P02794,6B8F,,7A6A,A,,,Added automatically via RCSB search. X-ray res: 1.06. Cryo-EM res: 1.15. Review chain_id and nmr_model before running pipeline.
+Myosin-5a,Q9Y4I1,4LX2,,,A,,,Added automatically via RCSB search. X-ray res: 1.5. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Spliceosome protein SF3B1,O75533,4OZ1,2FHO,7Q4O,C,,0,Added automatically via RCSB search. X-ray res: 1.74. Cryo-EM res: 2.1. Review chain_id and nmr_model before running pipeline.
+Ribosomal protein L3 (E. coli),P60438,4YBB,,8B0X,CD,,,Added automatically via RCSB search. X-ray res: 2.1. Cryo-EM res: 1.55. Review chain_id and nmr_model before running pipeline.
+Ribosomal protein S7,P02358,4YBB,,8B0X,AF,,,Added automatically via RCSB search. X-ray res: 2.1. Cryo-EM res: 1.55. Review chain_id and nmr_model before running pipeline.
+Elongation factor Tu (EF-Tu),P0A7N9,4YBB,,8B0X,C2,,,Added automatically via RCSB search. X-ray res: 2.1. Cryo-EM res: 1.55. Review chain_id and nmr_model before running pipeline.
+Initiation factor IF2,P0A705,,1ND9,,A,,0,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Hsp90-beta,P08238,9D9I,2L6J,9W5I,A,,0,Added automatically via RCSB search. X-ray res: 1.5. Cryo-EM res: 2.63. Review chain_id and nmr_model before running pipeline.
+Proteasome subunit Rpt1,P62191,,,9K53,B,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.5. Review chain_id and nmr_model before running pipeline.
+Adenosine A2A receptor,P29274,5NM4,,9EE8,A,,,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.63. Review chain_id and nmr_model before running pipeline.
+P-glycoprotein (ABCB1),P08183,,,8Y6H,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.49. Review chain_id and nmr_model before running pipeline.
+Influenza hemagglutinin,P03437,8PJF,,7ZJ6,C,,,Added automatically via RCSB search. X-ray res: 1.48. Cryo-EM res: 2.6. Review chain_id and nmr_model before running pipeline.
+Nucleoporin Nup133,Q8WUM0,1XKS,,,A,,,Added automatically via RCSB search. X-ray res: 2.35. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
+Importin beta-1,Q14974,1IBR,,9N85,B,,,Added automatically via RCSB search. X-ray res: 2.3. Cryo-EM res: 2.6. Review chain_id and nmr_model before running pipeline.
+V-ATPase subunit A,P38606,,,6WLZ,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.9. Review chain_id and nmr_model before running pipeline.
+Photosystem II protein D1,P0C0S1,5AJI,,9E68,A,,,Added automatically via RCSB search. X-ray res: 2.99. Cryo-EM res: 2.5. Review chain_id and nmr_model before running pipeline.
+ATP synthase subunit beta,P00829,2JDI,,6YY0,D,,,Added automatically via RCSB search. X-ray res: 1.9. Cryo-EM res: 3.23. Review chain_id and nmr_model before running pipeline.

@@ -1,0 +1,33 @@
+# Notebooks & kernel
+jupyter==1.1.1
+notebook==7.4.3
+ipykernel==6.29.5
+
+# HTTP & APIs
+requests==2.33.1
+
+# Data handling
+pandas==3.0.2
+numpy==2.4.4
+
+# Statistics
+scipy==1.17.1
+
+# Metrics
+open3d==0.19.0
+
+# Structure parsing  
+biopython==1.87
+gemmi==0.7.5
+
+# Visualisation
+matplotlib==3.10.8
+seaborn==0.13.2
+py3Dmol==2.5.4
+
+# Utilities
+tqdm==4.67.3
+python-dotenv==1.2.2
+
+# Testing
+pytest==9.0.3

@@ -1,0 +1,28 @@
+# Virtual environments
+.venv/
+
+#VScode
+.vscode/
+
+# Structure data directories (populated by 00_data_acquisition.ipynb)
+data/experimental/
+data/alphafold2/
+data/openfold3/
+
+# Pipeline outputs
+results/
+
+# Python artefacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS metadata (all levels)
+**/.DS_Store
+.DS_Store
+
+# Environment / secrets
+.env
