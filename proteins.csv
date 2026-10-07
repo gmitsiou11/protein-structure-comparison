@@ -1,74 +1,152 @@
-protein_name,uniprot_id,pdb_xray,pdb_nmr,pdb_cryoem,chain_id,chain_id_af2,nmr_model,notes
-Barnase,P00648,6PQK,1BNR,,A,,0,Added automatically via RCSB search. X-ray res: 1.2. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Protein G (GB1 domain parent),P06654,1IGD,1GB1,9G4T,A,,0,Added automatically via RCSB search. X-ray res: 1.1. Cryo-EM res: 2.51. Review chain_id and nmr_model before running pipeline.
-Adenylate kinase (E. coli),P69441,7APU,,,A,,,Added automatically via RCSB search. X-ray res: 1.36. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-T4 lysozyme,P00720,2O7A,2LC9,8DCS,A,,0,Added automatically via RCSB search. X-ray res: 0.84. Cryo-EM res: 2.5. Review chain_id and nmr_model before running pipeline.
-Myoglobin,P02185,5YCE,1MYF,,A,,0,Added automatically via RCSB search. X-ray res: 0.77. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Lysozyme C (human),P61626,2NWD,1IY3,8QUT,X,,0,Added automatically via RCSB search. X-ray res: 1.04. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
-Ribonuclease A,P61823,6ETK,2AAS,,A,,0,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-BPTI (aprotinin),P00974,1G6X,1JV8,,A,,0,Added automatically via RCSB search. X-ray res: 0.86. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-HIV-1 protease,P03366,2HS1,1Q3Y,8VBH,A,,0,Added automatically via RCSB search. X-ray res: 0.84. Cryo-EM res: 2.2. Review chain_id and nmr_model before running pipeline.
-Dihydrofolate reductase (E. coli),P0ABQ4,9PWM,,8V9R,A,,,Added automatically via RCSB search. X-ray res: 0.89. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
-Thioredoxin (E. coli),P0AA25,4HUA,1XOA,9JFS,A,,0,Added automatically via RCSB search. X-ray res: 1.1. Cryo-EM res: 2.67. Review chain_id and nmr_model before running pipeline.
-CheY response regulator,P0AE67,1JBE,1CEY,,A,,0,Added automatically via RCSB search. X-ray res: 1.08. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-HRas GTPase,P01112,2CE2,1AA9,,X,,0,Added automatically via RCSB search. X-ray res: 1.0. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Calmodulin,P0DP23,9MXD,1J7O,9J38,A,,0,Added automatically via RCSB search. X-ray res: 1.17. Cryo-EM res: 2.4. Review chain_id and nmr_model before running pipeline.
-Cyclophilin A,P62937,9E3S,1OCA,7UPN,C,,0,Added automatically via RCSB search. X-ray res: 1.08. Cryo-EM res: 3.5. Review chain_id and nmr_model before running pipeline.
-FKBP12,P62942,2PPN,1F40,8JCU,A,,0,Added automatically via RCSB search. X-ray res: 0.92. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
-Green fluorescent protein,P42212,6L27,,9SDL,A,,,Added automatically via RCSB search. X-ray res: 0.77. Cryo-EM res: 2.42. Review chain_id and nmr_model before running pipeline.
-Staphylococcal nuclease,P00644,4EQP,1JOK,,A,,0,Added automatically via RCSB search. X-ray res: 1.35. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-TEM-1 beta-lactamase,P62593,1M40,,,A,,,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Cytochrome c,P99999,5TY3,1J3S,,A,,0,Added automatically via RCSB search. X-ray res: 1.25. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Carbonic anhydrase II (human),P00918,3K34,6HD2,,A,,0,Added automatically via RCSB search. X-ray res: 0.9. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Superoxide dismutase 1 (human),P00441,4A7U,1BA9,9IYJ,A,,0,Added automatically via RCSB search. X-ray res: 0.98. Cryo-EM res: 2.92. Review chain_id and nmr_model before running pipeline.
-Transthyretin,P02766,1F86,2NBO,8PKF,A,,0,Added automatically via RCSB search. X-ray res: 1.1. Cryo-EM res: 2.3673. Review chain_id and nmr_model before running pipeline.
-Beta-2-microglobulin,P61769,4E0K,1JNJ,6LA6,A,,0,Added automatically via RCSB search. X-ray res: 0.97. Cryo-EM res: 2.39. Review chain_id and nmr_model before running pipeline.
-Tumor protein p53,P04637,9C5S,1A1U,8OXO,A,,0,Added automatically via RCSB search. X-ray res: 1.01. Cryo-EM res: 3.0. Review chain_id and nmr_model before running pipeline.
-Actin (beta),P60709,6MBK,,9QEW,Y,,,Added automatically via RCSB search. X-ray res: 1.69. Cryo-EM res: 2.18. Review chain_id and nmr_model before running pipeline.
-Tubulin beta chain,P07437,3QNZ,,8BPO,C,,,Added automatically via RCSB search. X-ray res: 2.2. Cryo-EM res: 2.8. Review chain_id and nmr_model before running pipeline.
-Hsp90-alpha,P07900,6TN5,2BUG,7KRJ,AAA,,0,Added automatically via RCSB search. X-ray res: 1.165. Cryo-EM res: 2.56. Review chain_id and nmr_model before running pipeline.
-GroEL chaperonin,P0A6F5,3VZ6,,8BKZ,A,,,Added automatically via RCSB search. X-ray res: 1.5. Cryo-EM res: 2.3. Review chain_id and nmr_model before running pipeline.
-ClpP protease,P0A7K2,1CTF,1RQS,7N2C,A,,0,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.72. Review chain_id and nmr_model before running pipeline.
-RNA polymerase II subunit RPB1,P24928,6G0R,2LTO,8PNP,C,,0,Added automatically via RCSB search. X-ray res: 1.25. Cryo-EM res: 2.49. Review chain_id and nmr_model before running pipeline.
-DNA-dependent protein kinase catalytic subunit,P78527,,,7Z87,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.91. Review chain_id and nmr_model before running pipeline.
-Kinesin-1 (KIF5B),Q12840,,,9T17,C,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.77. Review chain_id and nmr_model before running pipeline.
-Dynein heavy chain,Q14204,5OWO,,9BLZ,A,,,Added automatically via RCSB search. X-ray res: 1.79. Cryo-EM res: 2.2. Review chain_id and nmr_model before running pipeline.
-Beta-2 adrenergic receptor,P07550,1GQ4,6KR8,9U4Y,A,,0,Added automatically via RCSB search. X-ray res: 1.9. Cryo-EM res: 2.67. Review chain_id and nmr_model before running pipeline.
-TRPV1 ion channel,Q8NER1,,,8GFA,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.29. Review chain_id and nmr_model before running pipeline.
-CFTR (ABCC7),P13569,2PZE,2LOB,9MXL,A,,0,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.1. Review chain_id and nmr_model before running pipeline.
-SARS-CoV-2 spike glycoprotein,P0DTC2,7Z8O,7LC8,9GXG,A,,0,Added automatically via RCSB search. X-ray res: 0.96. Cryo-EM res: 1.92. Review chain_id and nmr_model before running pipeline.
-HIV-1 envelope glycoprotein gp160,P04578,8F3A,1MZI,,A,,0,Added automatically via RCSB search. X-ray res: 1.2. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Alpha-synuclein,P37840,8JJV,1XQ8,9EUU,B,,0,Added automatically via RCSB search. X-ray res: 1.23. Cryo-EM res: 1.93. Review chain_id and nmr_model before running pipeline.
-Tau protein,P10636,6ODG,1I8H,8Q98,A,,0,Added automatically via RCSB search. X-ray res: 1.0. Cryo-EM res: 1.75. Review chain_id and nmr_model before running pipeline.
-Prion protein (PrP),P04156,2OL9,1E1G,6LNI,A,,0,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: 2.702. Review chain_id and nmr_model before running pipeline.
-Amyloid beta precursor protein (APP),P05067,2FMA,1AMB,8BG0,A,,0,Added automatically via RCSB search. X-ray res: 0.85. Cryo-EM res: 1.99. Review chain_id and nmr_model before running pipeline.
-p27 Kip1,P46527,7OR8,,8BYA,P,,,Added automatically via RCSB search. X-ray res: 1.8. Cryo-EM res: 3.38. Review chain_id and nmr_model before running pipeline.
-c-Myc,P01106,9QNH,1A93,8OTS,P,,0,Added automatically via RCSB search. X-ray res: 1.3. Cryo-EM res: 3.3. Review chain_id and nmr_model before running pipeline.
-CREB-binding protein (CBP),Q92793,5I86,1JSP,7TBH,A,,0,Added automatically via RCSB search. X-ray res: 1.05. Cryo-EM res: 2.3. Review chain_id and nmr_model before running pipeline.
-Ankyrin-1,P16157,2YVI,2YQF,7UZQ,A,,0,Added automatically via RCSB search. X-ray res: 1.92. Cryo-EM res: 2.17. Review chain_id and nmr_model before running pipeline.
-Toll-like receptor 4 (TLR4),O00206,2Z62,5NAM,8WO1,A,,0,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.24. Review chain_id and nmr_model before running pipeline.
-Collagen alpha-1(I) chain,P02452,5CTD,2LLP,7E7B,A,,0,Added automatically via RCSB search. X-ray res: 1.5991. Cryo-EM res: 2.6. Review chain_id and nmr_model before running pipeline.
-Spectrin alpha chain,P02549,5J4O,1OWA,,A,,0,Added automatically via RCSB search. X-ray res: 1.54. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Fibrinogen gamma chain,P02679,9KHB,,,A,,,Added automatically via RCSB search. X-ray res: 1.03. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Hemoglobin subunit beta,P68871,2W72,2H35,8WJ0,B,,0,Added automatically via RCSB search. X-ray res: 1.07. Cryo-EM res: 2.24. Review chain_id and nmr_model before running pipeline.
-Lactate dehydrogenase A,P00338,5W8J,,,A,,,Added automatically via RCSB search. X-ray res: 1.55. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Beta-catenin,P35222,3FQN,2G57,,C,,0,Added automatically via RCSB search. X-ray res: 1.65. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Importin alpha-1,P52294,2JDQ,,,A,,,Added automatically via RCSB search. X-ray res: 2.2. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Vimentin,P08670,1GK7,,,A,,,Added automatically via RCSB search. X-ray res: 1.4. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Ferritin heavy chain,P02794,6B8F,,7A6A,A,,,Added automatically via RCSB search. X-ray res: 1.06. Cryo-EM res: 1.15. Review chain_id and nmr_model before running pipeline.
-Myosin-5a,Q9Y4I1,4LX2,,,A,,,Added automatically via RCSB search. X-ray res: 1.5. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Spliceosome protein SF3B1,O75533,4OZ1,2FHO,7Q4O,C,,0,Added automatically via RCSB search. X-ray res: 1.74. Cryo-EM res: 2.1. Review chain_id and nmr_model before running pipeline.
-Ribosomal protein L3 (E. coli),P60438,4YBB,,8B0X,CD,,,Added automatically via RCSB search. X-ray res: 2.1. Cryo-EM res: 1.55. Review chain_id and nmr_model before running pipeline.
-Ribosomal protein S7,P02358,4YBB,,8B0X,AF,,,Added automatically via RCSB search. X-ray res: 2.1. Cryo-EM res: 1.55. Review chain_id and nmr_model before running pipeline.
-Elongation factor Tu (EF-Tu),P0A7N9,4YBB,,8B0X,C2,,,Added automatically via RCSB search. X-ray res: 2.1. Cryo-EM res: 1.55. Review chain_id and nmr_model before running pipeline.
-Initiation factor IF2,P0A705,,1ND9,,A,,0,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Hsp90-beta,P08238,9D9I,2L6J,9W5I,A,,0,Added automatically via RCSB search. X-ray res: 1.5. Cryo-EM res: 2.63. Review chain_id and nmr_model before running pipeline.
-Proteasome subunit Rpt1,P62191,,,9K53,B,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.5. Review chain_id and nmr_model before running pipeline.
-Adenosine A2A receptor,P29274,5NM4,,9EE8,A,,,Added automatically via RCSB search. X-ray res: 1.7. Cryo-EM res: 2.63. Review chain_id and nmr_model before running pipeline.
-P-glycoprotein (ABCB1),P08183,,,8Y6H,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.49. Review chain_id and nmr_model before running pipeline.
-Influenza hemagglutinin,P03437,8PJF,,7ZJ6,C,,,Added automatically via RCSB search. X-ray res: 1.48. Cryo-EM res: 2.6. Review chain_id and nmr_model before running pipeline.
-Nucleoporin Nup133,Q8WUM0,1XKS,,,A,,,Added automatically via RCSB search. X-ray res: 2.35. Cryo-EM res: n/a. Review chain_id and nmr_model before running pipeline.
-Importin beta-1,Q14974,1IBR,,9N85,B,,,Added automatically via RCSB search. X-ray res: 2.3. Cryo-EM res: 2.6. Review chain_id and nmr_model before running pipeline.
-V-ATPase subunit A,P38606,,,6WLZ,A,,,Added automatically via RCSB search. X-ray res: n/a. Cryo-EM res: 2.9. Review chain_id and nmr_model before running pipeline.
-Photosystem II protein D1,P0C0S1,5AJI,,9E68,A,,,Added automatically via RCSB search. X-ray res: 2.99. Cryo-EM res: 2.5. Review chain_id and nmr_model before running pipeline.
-ATP synthase subunit beta,P00829,2JDI,,6YY0,D,,,Added automatically via RCSB search. X-ray res: 1.9. Cryo-EM res: 3.23. Review chain_id and nmr_model before running pipeline.
+protein_name,uniprot_id,organism,mature_start,mature_end,pdb_xray,chain_xray,pdb_nmr,chain_nmr,pdb_cryoem,chain_cryoem,cov_xray,cov_nmr,cov_cryoem,res_xray,res_cryoem,notes
+Type IV pilin PilE1,A0A0B7GU52,Streptococcus sanguinis,19,157,,,6I2O,A,8PFB,C,,0.813,0.942,,3.67,
+Toxin co-regulated pilus biosynthesis protein Q C-terminal domain-containing protein,A0AAI7ZGD2,Xanthomonas citri pv. citri (strain 306),22,139,,,2L4W,A,6GYB,A,,0.983,0.941,,3.28,
+ATP synthase epsilon chain (B1MLW3),B1MLW3,Mycobacteroides abscessus (strain ATCC 19977 / DSM 44196 / CCUG 20993 / CIP 104536 / JCM 13569 / NCTC 13031 / TMC 1543 / L948) (Mycobacterium abscessus),1,121,,,7VIL,A,9VKR,H,,0.992,1.0,,2.79,
+Type II secretion system core protein G,E0SM38,Dickeya dadantii (strain 3937) (Erwinia chrysanthemi (strain 3937)),8,153,,,29JD,A,11ME,B,,0.836,0.904,,3.6,
+"Acyl carrier protein, mitochondrial",O14561,Homo sapiens (Human),69,156,6ODD,A,2DNW,A,7OF0,w,0.966,0.977,0.898,2.0,2.2,
+C-X-C motif chemokine 11,O14625,Homo sapiens (Human),22,94,,,1RJT,A,9P0M,B,,1.0,0.945,,2.95,
+Ubiquitin/ISG15-conjugating enzyme E2 L6,O14933,Homo sapiens (Human),1,153,1WZV,A,2KJH,A,8SE9,C,0.98,0.98,0.993,2.1,3.2,
+Baculoviral IAP repeat-containing protein 5,O15392,Homo sapiens (Human),1,142,2QFA,A,1XOX,A,8RUP,K,0.965,0.824,0.958,1.4,2.42,
+NADH dehydrogenase [ubiquinone] 1 alpha subcomplex subunit 2,O43678,Homo sapiens (Human),2,99,,,1S3A,A,9I4I,G,,0.867,0.867,,2.63,
+Dynein light chain Tctex1,O64980,Chlamydomonas reinhardtii (Chlamydomonas smithii),1,114,,,1XDX,A,8GLV,AR,,1.0,1.0,,3.1,
+Gamma-aminobutyric acid receptor-associated protein,O95166,Homo sapiens (Human),1,116,7ZKR,A,1KOT,A,9TW2,F,0.991,1.0,0.983,1.1,3.58,
+Anterior gradient protein 2 homolog,O95994,Homo sapiens (Human),21,175,9ORI,A,2LNS,A,9I3U,B,0.871,0.871,0.858,1.74,2.9,
+Cytochrome c,P00004,Equus caballus (Horse),2,105,6K9J,A,1AKK,A,3JBT,B,1.0,1.0,1.0,0.98,3.8,
+"Plastocyanin, chloroplastic",P00289,Spinacia oleracea (Spinach),70,168,1AG6,A,1YLB,B,9TGG,Q,1.0,1.0,1.0,1.6,3.18,
+Lysozyme C (P00698),P00698,Gallus gallus (Chicken),19,147,2VB1,A,1E8L,A,9J0L,A,1.0,1.0,0.969,0.65,2.29,
+ATP synthase subunit c (P00845),P00845,Bacillus sp. (strain PS3),1,72,,,1WU0,A,6N2Y,c0,,1.0,0.986,,3.0,
+Glycoprotein hormones alpha chain,P01215,Homo sapiens (Human),25,116,9YXD,A,1DZ7,A,7UTZ,A,0.946,1.0,0.935,2.29,2.4,
+Alpha-cobratoxin,P01391,Naja kaouthia (Monocled cobra) (Naja siamensis),1,71,9HXO,A,1LXG,A,7PC0,K,1.0,1.0,1.0,1.49,3.0,
+Beta-mammal toxin Cn2,P01495,Centruroides noxius (Mexican scorpion),17,82,2YC1,C,1CN2,A,25IH,D,0.985,1.0,1.0,1.9,2.8,
+Histone H2B,P02283,Drosophila melanogaster (Fruit fly),2,123,,,7PJ1,B,9ZQB,C,,1.0,0.803,,2.1,
+"ATP synthase peripheral stalk subunit F6, mitochondrial",P02721,Bos taurus (Bovine),33,108,,,1VZS,A,9VPD,h,,1.0,0.816,,2.3,
+Transthyretin,P02766,Homo sapiens (Human),21,147,8C86,A,2NBO,A,8VE1,A,0.913,1.0,0.921,1.1,2.7,
+Light-harvesting protein B-870 alpha chain,P02947,Rhodospirillum rubrum,1,52,,,1XRD,A,7EQD,1,,1.0,0.904,,2.76,
+Angiogenin,P03950,Homo sapiens (Human),25,147,4AOH,A,1AWZ,A,9BDL,ANG,0.992,1.0,0.976,1.041,2.8,
+"Type-1 fimbrial protein, A chain",P04128,Escherichia coli (strain K12),24,182,5NKT,A,2JTY,A,9X67,A,0.95,1.0,1.0,1.5,1.85,
+Histone H2A type 1-B/E,P04908,Homo sapiens (Human),2,130,5B0Z,C,2RVQ,C,7VZ4,C,0.837,1.0,0.829,1.987,1.89,
+"Rod cGMP 3',5'-cyclic phosphodiesterase subunit gamma",P04972,Bos taurus (Bovine),1,87,,,2JU4,A,7JSN,C,,1.0,0.816,,3.2,
+Insulin-like growth factor 1,P05019,Homo sapiens (Human),49,118,1WQJ,I,1BQT,A,7WRQ,C,0.886,1.0,0.929,1.6,3.6,
+Interleukin-6,P05231,Homo sapiens (Human),30,212,1ALU,A,1IL6,A,8QY5,B,0.858,0.907,0.858,1.9,3.1,
+Protein S100-A9,P06702,Homo sapiens (Human),1,114,4GGF,L,5I8N,A,9OAA,B,0.956,1.0,0.912,1.6,3.67,
+Histone H2B type 1-J,P06899,Homo sapiens (Human),2,126,,,2RVQ,D,6R94,H,,1.0,0.8,,3.5,
+Profilin-1,P07737,Homo sapiens (Human),2,140,2PBD,P,1PFL,A,9AZP,J,1.0,1.0,1.0,1.501,3.79,
+DELTA-stichotoxin-She4b,P07845,Stichodactyla helianthus (Sun anemone) (Stoichactis helianthus),1,175,1GWY,A,2L2B,A,9GJ8,A,1.0,1.0,1.0,1.71,2.1,
+Protein FimF,P08189,Escherichia coli (strain K12),21,176,3BWU,F,2JMR,A,9FX0,F,0.821,0.987,0.91,1.76,3.1,
+Ferredoxin-1,P0A3C9,Thermosynechococcus vestitus (strain NIES-2133 / IAM M-273 / BP-1),2,98,5AUI,A,1ROE,A,7FIX,R1,1.0,1.0,1.0,1.499,1.97,
+Lactococcin-A immunity protein,P0A3M7,Lactococcus lactis subsp. lactis (Streptococcus lactis),1,98,,,5LFI,A,8HFS,B,,1.0,0.939,,2.98,
+Acyl carrier protein,P0A6A8,Escherichia coli (strain K12),2,78,1T8K,A,1ACP,A,8RMC,C,1.0,1.0,0.961,1.1,2.26,
+ATP synthase epsilon chain (P0A6E6),P0A6E6,Escherichia coli (strain K12),2,139,1FS0,E,1BSH,A,6OQR,H,0.928,1.0,0.986,2.1,3.1,
+Peptide deformylase,P0A6K3,Escherichia coli (strain K12),2,169,1XEO,A,1DEF,A,7D6Z,g,0.982,0.875,1.0,1.3,3.4,
+Transcription antitermination protein NusB,P0A780,Escherichia coli (strain K12),1,139,3D3B,A,1EY1,A,6GOV,B,1.0,1.0,1.0,1.3,3.7,
+Ribonuclease P protein component,P0A7Y8,Escherichia coli (strain K12),1,119,,,2LJP,A,7UO2,A,,1.0,0.941,,3.1,
+Ribosome maturation factor RimP,P0A8A8,Escherichia coli (strain K12),1,150,,,7AFR,X,7NAS,X,,1.0,1.0,,3.31,
+Outer membrane protein assembly factor BamE,P0A937,Escherichia coli (strain K12),20,113,,,2KM7,A,9CNW,E,,1.0,0.926,,2.6,
+Phosphocarrier protein HPr,P0AA04,Escherichia coli (strain K12),1,85,3CCD,A,1GGR,B,9S8K,E,1.0,1.0,1.0,1.0,2.06,
+Thioredoxin 1,P0AA25,Escherichia coli (strain K12),2,109,4HUA,A,1XOA,A,9JFS,E,1.0,1.0,0.972,1.1,2.67,
+Soluble cytochrome b562,P0ABE7,Escherichia coli,23,128,6DYF,A,1APC,A,6OVH,A,1.0,1.0,1.0,1.1,2.6,
+DNA damage-inducible protein I,P0ABR1,Escherichia coli (strain K12),1,81,,,1GHH,A,7YWA,A,,1.0,0.963,,3.26,
+DNA-binding transcriptional dual regulator CRP,P0ACJ8,Escherichia coli (strain K12),2,210,4R8H,B,2WC2,A,6B6H,G,0.962,1.0,0.962,1.46,3.9,
+Ribosome-associated inhibitor A,P0AD49,Escherichia coli (strain K12),2,113,4Y4O,1y,1L4S,A,9SLG,Y,0.866,1.0,0.938,2.3,2.16,
+Cell division activator CedA,P0AE60,Escherichia coli (strain K12),1,80,,,2BN8,A,8FTD,Z,,0.838,0.912,,2.76,
+Peptidyl-prolyl cis-trans isomerase A,P0AFL3,Escherichia coli (strain K12),25,190,1V9T,A,1CLH,A,8XCK,f,1.0,1.0,0.964,1.7,2.75,
+Protein rof,P0AFW8,Escherichia coli (strain K12),1,84,,,1SG5,A,8PTO,a,,1.0,0.976,,2.7,
+Ribosome hibernation promoting factor,P0AFX0,Escherichia coli (strain K12),1,95,,,2RQL,A,9IOT,v,,1.0,1.0,,2.7,
+Tau-theraphotoxin-Hs1a,P0CH43,Cyriopagopus schmidti (Chinese bird spider) (Haplopelma schmidti),1,79,,,6CUC,A,5IRX,E,,0.949,0.949,,2.95,
+Mambalgin-1,P0DKR6,Dendroaspis polylepis polylepis (Black mamba),22,78,5DO6,A,2MJY,A,7CFT,D,1.0,1.0,1.0,1.697,3.9,
+Calmodulin-1 (P0DP23),P0DP23,Homo sapiens (Human),2,149,9MXD,A,2JZI,A,9ZN7,I,0.966,1.0,0.986,1.17,2.23,
+Calmodulin-1 (P0DP29),P0DP29,Rattus norvegicus (Rat),2,149,4J9Y,R,2MGU,A,9O7S,E,0.986,1.0,0.98,1.51,2.71,
+ADP-ribosylation factor 1 (P11076),P11076,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),2,181,,,2K5U,A,8S5C,A,,1.0,0.906,,3.1,
+"Oxygen-evolving enhancer protein 3, chloroplastic",P12301,Spinacia oleracea (Spinach),84,232,1VYK,A,2MWQ,A,3JCU,Q,0.866,1.0,0.993,1.49,3.2,
+Photosystem I reaction center subunit IV,P12975,Synechocystis sp. (strain ATCC 27184 / PCC 6803 / Kazusa),2,74,,,1GXI,E,9AU4,E,,1.0,0.945,,2.03,
+Intrinsic membrane protein PufX,P13402,Cereibacter sphaeroides (strain ATCC 17023 / DSM 158 / JCM 6121 / CCUG 31486 / LMG 2827 / NBRC 12203 / NCIMB 8253 / ATH 2.4.1.) (Rhodobacter sphaeroides),1,82,,,2NRG,A,7VOR,X,,1.0,0.829,,2.74,
+C-C motif chemokine 2,P13500,Homo sapiens (Human),24,99,7SO0,B,1DOM,A,7XA3,L,0.921,1.0,0.908,1.74,2.9,
+CD59 glycoprotein,P13987,Homo sapiens (Human),26,102,2J8B,A,1CDQ,A,8B0F,G,1.0,1.0,1.0,1.15,3.0,
+Large ribosomal subunit protein eL30,P14120,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),2,105,1NMU,B,1CK2,A,9PN5,Ac,1.0,1.0,0.933,2.31,1.75,
+Thioredoxin,P14949,Bacillus subtilis (strain 168),2,104,2VOC,A,2GZY,A,9BXT,E,1.0,1.0,0.835,1.5,2.88,
+Major pollen allergen Bet v 1-A,P15494,Betula pendula (European white birch) (Betula verrucosa),2,160,4BK7,A,1B6F,A,7MXL,C,1.0,1.0,1.0,1.14,3.2,
+Alpha-insect toxin LqhaIT,P17728,Leiurus hebraeus (Hebrew deathstalker scorpion) (Leiurus quinquestriatus hebraeus),20,85,2YEO,A,1LQH,A,9LKZ,C,0.97,0.955,0.955,1.08,2.87,
+"DNA-directed RNA polymerases I, II, and III subunit RPABC3 (P20436)",P20436,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),2,146,1TWF,H,1A1D,A,9SV6,H,0.917,1.0,0.924,2.3,1.96,
+Cofilin-2 (P21566),P21566,Gallus gallus (Chicken),1,166,,,1TVJ,A,5YU8,H,,1.0,0.988,,3.8,
+Non-selective voltage-gated ion channel VDAC1,P21796,Homo sapiens (Human),2,283,,,2K4T,A,8J0O,K,,1.0,1.0,,3.32,
+Cofilin-1,P23528,Homo sapiens (Human),2,166,9H1F,A,1Q8G,A,9QFJ,F,0.952,1.0,1.0,1.8,2.31,
+Proteasome subunit alpha,P25156,Thermoplasma acidophilum (strain ATCC 25905 / DSM 1728 / JCM 9062 / NBRC 15155 / AMRC-C165),1,233,1YAR,A,2KU1,A,8F7K,A,0.948,1.0,0.987,1.9,1.94,
+Pre-mRNA-splicing factor BUD31,P25337,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),1,157,,,2MY1,A,9DTR,L,,0.994,0.994,,2.31,
+Aquaporin-1,P29972,Homo sapiens (Human),2,269,,,6POJ,A,9ZCZ,A,,1.0,0.922,,2.3,
+Large ribosomal subunit protein uL11 (P30050),P30050,Homo sapiens (Human),1,165,,,7VB2,A,8YOO,Lt,,1.0,0.855,,2.0,
+Chaperone protein FimC,P31697,Escherichia coli (strain K12),37,241,7B0X,C,1BF8,A,9FY9,C,1.0,1.0,0.966,1.7,3.3,
+"Cytochrome c oxidase subunit 13, mitochondrial",P32799,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),10,129,,,6ZDB,A,9ETZ,k,,1.0,0.942,,2.4,
+Eukaryotic translation initiation factor eIF-1,P32911,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),2,108,,,2OGH,A,8CAH,m,,1.0,0.841,,3.0,
+Interleukin-13,P35225,Homo sapiens (Human),25,146,3L5X,A,1GA3,A,8BLQ,D,0.828,0.918,0.893,1.9,3.97,
+Leptin,P41159,Homo sapiens (Human),22,167,1AX8,A,8K6Z,A,8X85,C,0.89,1.0,1.0,2.4,3.58,
+Eukaryotic translation initiation factor 1,P41567,Homo sapiens (Human),2,113,,,2IF1,A,8PPL,Ip,,1.0,0.938,,2.65,
+SPI-1 type 3 secretion system needle filament protein,P41784,Salmonella typhimurium (strain LT2 / SGSC1412 / ATCC 700720),1,80,,,2KV7,A,6OFG,A,,1.0,0.975,,2.9,
+"Eukaryotic translation initiation factor 1A, X-chromosomal",P47813,Homo sapiens (Human),1,144,,,1D7Q,A,8PJ5,q,,0.993,0.812,,2.9,
+Beta-diguetoxin-Dc1a,P49126,Diguetia canities (Desert bush spider) (Segestria canities),39,94,,,2MI5,A,6A95,B,,1.0,1.0,,2.6,
+"DNA-directed RNA polymerases I, II, and III subunit RPABC3 (P52434)",P52434,Homo sapiens (Human),2,150,,,2F3I,A,9EHZ,H,,1.0,0.993,,2.6,
+Alpha-like toxin Lqh3,P56678,Leiurus hebraeus (Hebrew deathstalker scorpion) (Leiurus quinquestriatus hebraeus),1,67,,,1BMR,A,7K18,B,,1.0,1.0,,3.3,
+Large ribosomal subunit protein uL16,P60489,Thermus thermophilus (strain ATCC 27634 / DSM 579 / HB8),1,141,4Y4O,1Q,1WKI,A,9NO7,Q,1.0,1.0,1.0,2.3,2.13,
+Interleukin-2,P60568,Homo sapiens (Human),21,153,8SOZ,A,1IRL,A,9KMC,D,0.857,1.0,1.0,1.64,2.97,
+Alpha-bungarotoxin,P60615,Bungarus multicinctus (Many-banded krait),22,95,9FYS,Z,1ABT,A,9GU1,I,1.0,1.0,0.986,1.32,2.48,
+Aquaporin Z,P60844,Escherichia coli (strain K12),1,231,2O9G,A,8H1D,A,8UY6,A,0.996,1.0,0.983,1.9,1.9,
+Cell division control protein 42 homolog,P60953,Homo sapiens (Human),1,188,2NGR,A,1AJE,A,9VM2,B,1.0,0.995,0.947,1.9,3.94,
+Ubiquitin-conjugating enzyme E2 D3,P61077,Homo sapiens (Human),1,147,5EGG,A,2FUH,A,9V9Q,P,1.0,0.993,0.993,1.76,2.8,
+Lysozyme C (P61626),P61626,Homo sapiens (Human),19,148,2NWD,X,1IY3,A,8R4A,A,1.0,1.0,1.0,1.04,2.8,
+Ubiquitin-fold modifier 1,P61960,Homo sapiens (Human),1,83,8BZR,B,1WXS,A,8OJ5,D,0.988,1.0,0.94,1.781,2.9,
+Histone H4,P62799,Xenopus laevis (African clawed frog),2,103,2HUE,C,6O22,F,7TN2,B,0.804,0.804,0.873,1.7,2.3,
+GTP-binding nuclear protein Ran,P62826,Homo sapiens (Human),2,216,3GJ0,A,2MMC,A,9N85,C,0.958,1.0,0.967,1.48,2.6,
+Ubiquitin-conjugating enzyme E2 D2,P62837,Homo sapiens (Human),1,147,9GLS,AAA,1UR6,A,9DNS,D,1.0,1.0,0.993,1.25,2.8,
+Peptidyl-prolyl cis-trans isomerase FKBP1A,P62942,Homo sapiens (Human),2,108,2PPN,A,1F40,A,8ERA,B,1.0,1.0,1.0,0.92,2.86,
+Ras-related C3 botulinum toxin substrate 1,P63000,Homo sapiens (Human),1,189,9IFK,A,2RMK,A,8WEJ,E,0.894,1.0,0.942,1.34,2.79,
+Small ubiquitin-related modifier 1,P63165,Homo sapiens (Human),2,97,4WJQ,A,1A5R,A,9DRJ,D,0.812,1.0,0.802,1.35,2.7,
+S-phase kinase-associated protein 1,P63208,Homo sapiens (Human),2,163,6M90,B,5XYL,A,7Z8V,S,0.833,1.0,0.821,2.05,2.7,
+SUMO-conjugating enzyme UBC9,P63279,Homo sapiens (Human),2,158,5F6E,A,2PX9,B,9DRJ,C,0.994,1.0,0.994,1.12,2.7,
+Ubiquitin-conjugating enzyme E2 L3,P68036,Homo sapiens (Human),1,154,7V8F,A,6N13,C,7OIK,B,0.994,1.0,0.987,1.66,3.5,
+ATP synthase subunit c (P68699),P68699,Escherichia coli (strain K12),1,79,,,1A91,A,6OQR,I,,1.0,0.975,,3.1,
+Hemoglobin subunit beta,P68871,Homo sapiens (Human),2,147,2W72,B,2H35,B,8WJ0,B,1.0,1.0,0.973,1.07,2.24,
+Large ribosomal subunit protein bL25,P68919,Escherichia coli (strain K12),1,94,1DFU,P,1B75,A,8B0X,u,1.0,1.0,1.0,1.8,1.55,
+Translation initiation factor IF-1,P69222,Escherichia coli (strain K12),2,72,,,1AH9,A,9FDA,I,,1.0,0.986,,2.0,
+Capsid protein G8P,P69541,Enterobacteria phage M13 (Bacteriophage M13),24,73,,,2CPB,A,8IXJ,A,,1.0,0.92,,3.1,
+Hemoglobin subunit alpha,P69905,Homo sapiens (Human),2,142,2W72,A,2H35,A,8WJ0,A,1.0,1.0,1.0,1.07,2.24,
+C-C motif chemokine 7,P80098,Homo sapiens (Human),24,99,8FK6,B,1BO0,A,8JPS,C,0.921,1.0,0.829,1.74,3.65,
+Thioredoxin-like protein 4A,P83876,Homo sapiens (Human),1,142,1QGV,A,1PQN,A,8H6L,4F,0.923,0.894,0.993,1.4,2.6,
+Histone H2A,P84051,Drosophila melanogaster (Fruit fly),2,124,2NQB,C,7PJ1,A,9ZQB,B,0.862,1.0,0.886,2.3,2.1,
+ADP-ribosylation factor 1 (P84077),P84077,Homo sapiens (Human),2,181,8SDW,A,1U81,A,7R4H,C,0.944,0.911,0.917,1.75,2.34,
+ATP synthase epsilon chain (P9WPV1),P9WPV1,Mycobacterium tuberculosis (strain ATCC 25618 / H37Rv),2,121,,,5YIO,A,8J0S,H,,1.0,0.983,,2.58,
+Telomere replication protein EST3,Q03096,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),1,181,,,2M9V,A,9SWN,C,,0.934,0.994,,3.0,
+Pre-mRNA-splicing factor RDS3,Q06835,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),1,107,,,2K0A,A,5ZWM,5,,0.991,0.963,,3.4,
+Mitotic spindle assembly checkpoint protein MAD2A,Q13257,Homo sapiens (Human),2,205,2VFX,E,1S2H,A,6TLJ,Z,1.0,1.0,0.956,1.95,3.8,
+Interleukin-18,Q14116,Homo sapiens (Human),37,193,2VXT,I,1J0S,A,8SPB,C,0.994,1.0,0.822,1.49,3.2,
+Elongin-C,Q15369,Homo sapiens (Human),1,112,8BDS,B,2MA9,C,8CX0,E,0.804,0.812,0.857,1.72,2.7,
+Elongin-B,Q15370,Homo sapiens (Human),1,118,7Z76,A,2JZ3,B,9OGD,F,0.881,1.0,0.898,1.32,2.49,
+Ubiquitin-like protein NEDD8,Q15843,Homo sapiens (Human),1,76,1NDD,B,2KO3,A,9T7V,N,1.0,1.0,0.947,1.6,2.95,
+Ribosome-binding factor A,Q2G2Q4,Staphylococcus aureus (strain NCTC 8325 / PS 47),1,116,8BXA,A,6YE5,A,8BYV,A,0.853,0.991,1.0,2.22,2.89,
+Light-harvesting protein B-870 beta chain,Q2RQ23,Rhodospirillum rubrum (strain ATCC 11170 / ATH 1.1.1 / DSM 467 / LMG 4362 / NCIMB 8255 / S1),3,56,,,1WRG,A,7OY8,Q,,1.0,0.87,,2.5,
+Regulatory protein Cgi121,Q57646,Methanocaldococcus jannaschii (strain ATCC 43067 / DSM 2661 / JAL-1 / JCM 10045 / NBRC 100440) (Methanococcus jannaschii),1,145,,,2K8Y,A,8UNK,C,,1.0,0.972,,2.91,
+Large ribosomal subunit protein uL11 (Q5SLP6),Q5SLP6,Thermus thermophilus (strain ATCC 27634 / DSM 579 / HB8),1,147,,,2KLM,A,5ZLU,f,,1.0,0.912,,3.6,
+Small ribosomal subunit protein bS6,Q5SLP8,Thermus thermophilus (strain ATCC 27634 / DSM 579 / HB8),1,101,6I69,A,2KJV,A,9NO7,f,0.931,1.0,0.99,1.2,2.13,
+H/ACA ribonucleoprotein complex subunit NOP10,Q6Q547,Saccharomyces cerevisiae (strain ATCC 204508 / S288c) (Baker's yeast),1,58,3U28,B,1Y2Y,A,9G25,B,0.828,1.0,1.0,1.9,2.89,
+General transcription factor IIH subunit 5,Q6ZYL4,Homo sapiens (Human),1,71,1YDL,A,2JNJ,A,7NVV,5,0.93,1.0,0.93,2.3,2.9,
+Geopilin domain 1 protein,Q74D23,Geobacter sulfurreducens (strain ATCC 51573 / DSM 12127 / PCA),30,90,,,2M7G,A,6VK9,0,,1.0,1.0,,3.8,
+Sigma factor-binding protein Crl,Q7CR52,Salmonella typhimurium (strain LT2 / SGSC1412 / ATCC 700720),1,133,,,2MZ8,A,6OMF,J,,1.0,0.955,,3.26,
+Tll0220 protein,Q8DMA1,Thermosynechococcus vestitus (strain NIES-2133 / IAM M-273 / BP-1),1,149,,,2MXA,A,6TJV,Q,,0.866,0.993,,3.2,
+Far1,Q8GNY5,Staphylococcus aureus,1,213,4ADN,A,2MZW,B,9GHE,V,1.0,1.0,0.953,1.65,1.87,
+RNA polymerase inhibitor p7,Q8LTJ5,Xipdecavirus Xp10,1,73,,,2MC5,A,6J9E,J,,1.0,0.904,,3.41,
+SsrA-binding protein,Q8RR57,Thermus thermophilus (strain ATCC 27634 / DSM 579 / HB8),1,144,,,1J1H,A,6Q95,5,,0.854,1.0,,3.7,
+Large ribosomal subunit protein eL33,Q8TZV6,Pyrococcus furiosus (strain ATCC 43587 / DSM 3638 / JCM 8422 / Vc1),1,87,,,1SQR,A,9QF4,Bc,,1.0,0.989,,2.59,
+Large ribosomal subunit protein eL8,Q8U160,Pyrococcus furiosus (strain ATCC 43587 / DSM 3638 / JCM 8422 / Vc1),1,123,7OZQ,A,4BY9,D,9QF4,BF,1.0,0.984,0.992,1.91,2.59,
+Translation initiation factor 2 subunit beta,Q97W59,Saccharolobus solfataricus (strain ATCC 35092 / DSM 1617 / JCM 11322 / P2) (Sulfolobus solfataricus),1,139,,,2NXU,A,6SWC,8,,0.964,0.928,,3.3,
+Small ribosomal subunit protein eS8,Q980W3,Saccharolobus solfataricus (strain ATCC 35092 / DSM 1617 / JCM 11322 / P2) (Sulfolobus solfataricus),1,133,,,2KCO,A,9FHL,J,,1.0,0.955,,2.5,
+Calcineurin B homologous protein 1,Q99653,Homo sapiens (Human),2,195,,,2E30,A,7X2U,C,,1.0,0.954,,3.2,
+C-C motif chemokine 19,Q99731,Homo sapiens (Human),22,98,7STA,A,2MP1,A,9KO2,C,0.831,1.0,0.896,2.5,2.98,
+Coat protein,Q9AZ42,Acinetobacter phage AP205,1,131,5FS4,B,5JZR,A,8TWC,AB,0.954,1.0,0.985,1.73,3.0,
+Ubiquitin-like protein 5,Q9BZL1,Homo sapiens (Human),1,73,4PYU,A,1P0R,A,8H6K,4M,1.0,1.0,1.0,2.0,2.7,
+MbtH-like domain-containing protein,Q9I169,Pseudomonas aeruginosa (strain ATCC 15692 / DSM 22644 / CIP 104116 / JCM 14847 / LMG 12228 / 1C / PRS 101 / PAO1),1,72,2PST,X,2GPF,A,9UP2,B,0.847,1.0,0.847,1.8,3.33,
+Dynein light chain roadblock-type 1,Q9NP97,Homo sapiens (Human),2,96,2HZ5,A,1Z09,A,6F1Z,s,0.916,1.0,0.979,2.1,3.4,
+Anaphase-promoting complex subunit 11,Q9NYG5,Homo sapiens (Human),1,84,,,2MT5,A,9GAW,C,,0.81,0.964,,2.9,
+Apoptosis-associated speck-like protein containing a CARD,Q9ULZ3,Homo sapiens (Human),1,195,,,2KN6,A,9WZ7,A,,1.0,0.897,,2.66,
+Dynein axonemal light chain 1,Q9XHH2,Chlamydomonas reinhardtii (Chlamydomonas smithii),1,198,5YXM,A,1DS9,A,8GLV,AA,0.98,1.0,0.985,1.545,3.1,
+Cofilin-2 (Q9Y281),Q9Y281,Homo sapiens (Human),2,166,,,7M0G,A,9Y9P,a,,1.0,1.0,,2.06,
+Ribosome maturation protein SBDS,Q9Y3A5,Homo sapiens (Human),2,250,,,2KDO,A,5AN9,J,,1.0,1.0,,3.3,
+Peptidyl-prolyl cis-trans isomerase-like 1,Q9Y3C6,Homo sapiens (Human),1,166,2X7K,A,1XWN,A,9S2E,S,0.988,1.0,0.958,1.15,2.4,
+Phage protein,V9H5N5,Simonsiella muelleri ATCC 29453,1,130,,,8JB9,A,8HJ4,C,,1.0,1.0,,3.1,

@@ -8,6 +8,10 @@
 data/experimental/
 data/alphafold2/
 data/openfold3/
+data/reference/
+data/msas/
+
+thesis_of3/
 
 # Pipeline outputs
 results/
@@ -26,3 +30,4 @@ __pycache__/
 
 # Environment / secrets
 .env
+

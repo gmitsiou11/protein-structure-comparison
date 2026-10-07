@@ -1,6 +1,16 @@
 """
 Parse mmCIF structure files and extract Cα coordinates, backbone dihedral angles and atomic coordinates.
 
+Every extractor takes an optional ``residue_range = (first, last)``: only the
+residues whose number lies in that closed interval are returned.  It mirrors
+Machaon's ``PDBHandler.residue_selection``: residues are selected by residue
+number, and φ/ψ are still computed with their neighbours in the whole chain.
+The truncation test of notebook 03 (sensitivity.truncation_experiment) uses it
+to remove residues from the ends of a chain.
+
+Alternate conformations are reduced to one, as Biopython (and so Machaon) does:
+for each atom the alternate location with the highest occupancy (the first one
+on ties), and for a residue position modelled as two residue types the last one.
 """
 
 import gemmi
@@ -10,10 +20,45 @@ from pathlib import Path
 _STRUCTURE_CACHE: dict[str, gemmi.Structure] = {}
 
 
+def keep_one_conformer(structure: gemmi.Structure) -> gemmi.Structure:
+    """
+    Reduce alternate conformations in place, with Biopython's rules.
+
+    Atoms: of the alternate locations of one atom name, keep the one with the
+    highest occupancy; on ties the first in the file (Bio.PDB DisorderedAtom).
+    Residues: when consecutive residues share a residue number (two residue
+    types at one position), keep the last (Bio.PDB DisorderedResidue).
+    """
+    for model in structure:
+        for chain in model:
+            for i in range(len(chain) - 2, -1, -1):
+                if chain[i].seqid == chain[i + 1].seqid:
+                    del chain[i]
+            for residue in chain:
+                best: dict[str, int] = {}
+                drop: list[int] = []
+                for k, atom in enumerate(residue):
+                    if atom.altloc == "\0":
+                        continue
+                    j = best.get(atom.name)
+                    if j is None:
+                        best[atom.name] = k
+                    elif atom.occ > residue[j].occ:
+                        drop.append(j)
+                        best[atom.name] = k
+                    else:
+                        drop.append(k)
+                for k in sorted(drop, reverse=True):
+                    del residue[k]
+    return structure
+
+
 def load_structure(mmcif_path: str) -> gemmi.Structure:
-    """Load a mmCIF file, using a module-level cache to avoid repeated disk reads."""
+    """Load a mmCIF file with one conformer per atom (cached: each file is read once)."""
     if mmcif_path not in _STRUCTURE_CACHE:
-        _STRUCTURE_CACHE[mmcif_path] = gemmi.read_structure(mmcif_path)
+        structure = keep_one_conformer(gemmi.read_structure(mmcif_path))
+        structure.setup_entities()  # needed by chain.get_polymer()
+        _STRUCTURE_CACHE[mmcif_path] = structure
     return _STRUCTURE_CACHE[mmcif_path]
 
 
@@ -22,39 +67,61 @@ def clear_structure_cache() -> None:
     _STRUCTURE_CACHE.clear()
 
 
+def _one_letter(residue_name: str) -> str:
+    """
+    One-letter code of an amino acid, upper case; "X" if unknown.
+
+    gemmi returns lower case for modified residues (MSE -> "m") and a space
+    for non-amino acids, so strip + upper-case and fall back to "X".
+    """
+    info = gemmi.find_tabulated_residue(residue_name)
+    if info is None or not info.is_amino_acid():
+        return "X"
+    return (info.one_letter_code or "").strip().upper() or "X"
+
+
+def _in_range(residue: gemmi.Residue, residue_range: tuple[int, int] | None) -> bool:
+    """True if no range is given or the residue number lies in [first, last]."""
+    if residue_range is None:
+        return True
+    first, last = residue_range
+    return first <= residue.seqid.num <= last
+
+
 def get_ca_coords_and_seq(
     structure: gemmi.Structure,
     model_idx: int = 0,
     chain_id: str = None,
+    residue_range: tuple[int, int] | None = None,
 ) -> tuple[np.ndarray, str]:
     """
     Extract Cα coordinates and the one-letter amino acid sequence.
 
     Parameters
     ----------
-    structure : gemmi.Structure
-    model_idx : which model to use (relevant for NMR ensembles)
-    chain_id  : chain to extract; if None, uses the first chain in the model
+    structure     : gemmi.Structure
+    model_idx     : which model to use (relevant for NMR ensembles)
+    chain_id      : chain to extract; if None, uses the first chain in the model
+    residue_range : (first, last) residue numbers to keep; None = whole chain
 
     Returns
     -------
     coords : ndarray of shape (N, 3)
-    seq    : one-letter amino acid string of length N (one-letter string is important for next step validation)
+    seq    : one-letter amino acid string of length N (used for the sequence alignment)
     """
     coords, seq = [], []
     model = structure[model_idx]
     chains = [model[chain_id]] if chain_id else [model[0]]
 
     for chain in chains:
-        for residue in chain:
+        for residue in chain.get_polymer():
+            if not _in_range(residue, residue_range):
+                continue
             for atom in residue:
                 if atom.name == "CA":
                     pos = atom.pos
                     coords.append([pos.x, pos.y, pos.z])
-                    info = gemmi.find_tabulated_residue(residue.name)
-                    seq.append(
-                        info.one_letter_code if info and info.one_letter_code else "X"
-                    )
+                    seq.append(_one_letter(residue.name))
                     break
 
     return np.array(coords), "".join(seq)
@@ -64,6 +131,7 @@ def get_phi_psi_with_index(
     structure: gemmi.Structure,
     model_idx: int = 0,
     chain_id: str = None,
+    residue_range: tuple[int, int] | None = None,
 ) -> tuple[np.ndarray, list]:
     """
     Compute backbone phi/psi angles and return them with the corresponding
@@ -71,9 +139,12 @@ def get_phi_psi_with_index(
 
     Parameters
     ----------
-    structure : gemmi.Structure
-    model_idx : model index (0-based)
-    chain_id  : chain to process; if None, uses the first chain
+    structure     : gemmi.Structure
+    model_idx     : model index (0-based)
+    chain_id      : chain to process; if None, uses the first chain
+    residue_range : (first, last) residue numbers to keep; None = whole chain.
+                    Angles are computed with the neighbours in the whole chain
+                    (as Machaon does), then only residues in the range are kept.
 
     Returns
     -------
@@ -81,6 +152,7 @@ def get_phi_psi_with_index(
              where both angles are well-defined (terminal residues are excluded)
     ca_indices : list of length M; ca_indices[k] is the 0-based index of that
                  residue in the Cα array returned by get_ca_coords_and_seq
+                 (called with the same residue_range)
     """
     model = structure[model_idx]
     chains = [model[chain_id]] if chain_id else [model[0]]
@@ -89,8 +161,10 @@ def get_phi_psi_with_index(
     ca_counter = 0
 
     for chain in chains:
-        residues = list(chain)
+        residues = list(chain.get_polymer())
         for i, residue in enumerate(residues):
+            if not _in_range(residue, residue_range):
+                continue
             if not any(atom.name == "CA" for atom in residue):
                 continue
 
@@ -100,7 +174,8 @@ def get_phi_psi_with_index(
             prev_res = residues[i - 1] if i > 0 else None
             next_res = residues[i + 1] if i < len(residues) - 1 else None
             result = gemmi.calculate_phi_psi(prev_res, residue, next_res)
-            phi, psi = result[0], result[1]
+            # gemmi returns radians; Machaon (and every doc here) uses degrees
+            phi, psi = np.degrees(result[0]), np.degrees(result[1])
 
             if not (np.isnan(phi) or np.isnan(psi)):
                 angles.append([phi, psi])
@@ -115,7 +190,8 @@ def get_all_atom_coords(
     structure: gemmi.Structure,
     model_idx: int = 0,
     chain_id: str = None,
-    ca_index_filter: "set[int] | None" = None,
+    residue_range: tuple[int, int] | None = None,
+    include_hydrogens: bool = False,
 ) -> np.ndarray:
     """
     Extract all heavy-atom (non-hydrogen, non-deuterium) coordinates from a chain.
@@ -128,49 +204,29 @@ def get_all_atom_coords(
 
     Parameters
     ----------
-    structure : gemmi.Structure
-    model_idx : model index (0 for X-ray / Cryo-EM / AF; NMR ensemble index otherwise)
-    chain_id  : chain to extract; if None, uses the first chain in the model
-    ca_index_filter : optional set of 0-based Cα indices as returned by
-        get_ca_coords_and_seq.  When provided, only atoms belonging to residues
-        whose Cα index is in this set are returned.  This restricts t-alpha to
-        the sequence-aligned residues, making its structural scope consistent with
-        RMSD, w-rdist, and b-phipsi.  When None (default), all heavy atoms from
-        all residues are returned (backward-compatible behaviour).
+    structure     : gemmi.Structure
+    model_idx     : model index (0 for X-ray / Cryo-EM / AF; NMR ensemble index otherwise)
+    chain_id      : chain to extract; if None, uses the first chain in the model
+    residue_range : (first, last) residue numbers to keep; None = whole chain
+    include_hydrogens : False (default, the pipeline's choice) drops H and D;
+                    True keeps every atom of the polymer residues, which is what
+                    Machaon's load_points does (used only for the sensitivity check).
 
     Returns
     -------
     ndarray of shape (N_atoms, 3), or shape (0, 3) if no atoms found.
-
-    Notes
-    -----
-    The Cα counter increments only for residues that contain a CA atom, mirroring
-    the counting logic in get_ca_coords_and_seq so that ca_index_filter indices
-    correspond correctly between the two functions.
     """
     coords: list[list[float]] = []
     model = structure[model_idx]
     chains = [model[chain_id]] if chain_id else [model[0]]
     _H = gemmi.Element("H")
     _D = gemmi.Element("D")
-    ca_counter = 0
     for chain in chains:
-        for residue in chain:
-            has_ca = any(atom.name == "CA" for atom in residue)
-            if has_ca:
-                ca_idx: "int | None" = ca_counter
-                ca_counter += 1
-            else:
-                ca_idx = None
-
-            # When a filter is active, skip residues not in the aligned set
-            # (and always skip residues without a CA atom, which have no index).
-            if ca_index_filter is not None:
-                if ca_idx is None or ca_idx not in ca_index_filter:
-                    continue
-
+        for residue in chain.get_polymer():
+            if not _in_range(residue, residue_range):
+                continue
             for atom in residue:
-                if atom.element not in (_H, _D):
+                if include_hydrogens or atom.element not in (_H, _D):
                     pos = atom.pos
                     coords.append([pos.x, pos.y, pos.z])
     return np.array(coords, dtype=float) if coords else np.empty((0, 3), dtype=float)

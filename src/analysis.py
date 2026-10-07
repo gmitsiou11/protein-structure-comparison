@@ -1,46 +1,53 @@
 """
-Statistical analysis of protein structure comparison results.
+Statistical analysis of the comparison results, at the level of proteins.
 
-With only 1–3 exp-vs-exp comparison pairs per protein, classical parametric
-tests (t-test, ANOVA) are severely underpowered and are not reported. Instead:
+The comparisons of one protein are not independent: the same experimental
+structures and predictions appear in several pairs.  So the unit of analysis
+is the protein (protein_table).  For each protein and metric:
 
-  1. Descriptive statistics (mean, std, range) per comparison category.
-  2. Cohen's d between AI and exp-vs-exp distributions — a size measure that
-     does not depend on sample size. Treat as a directional signal only.
-  3. Variance ratios — Var(AI) / Var(Exp). A ratio > 1 means AI introduces
-     more variability than is seen between experimental methods.
-  4. Per-protein within-range check: does each AI metric fall within
-     exp-vs-exp mean +/- 1 sigma? This is an operational comparison, not a test.
+  exp       median distance between its experimental structures (1 or 3
+            pairs): the experimental variability of that protein
+  af2, of3  median distance between the prediction and each experimental
+            structure (2 or 3 pairs)
+  nmr_ens   distance from the representative NMR model (src/nmr.py) to the
+            other models of its ensemble
 
+A prediction is "within experimental variability" when af2 <= exp: it is no
+farther from the experiments than they are from each other.  Across proteins
+(summarise_proteins) the analysis reports the fraction of proteins within experimental
+variability, the median of (prediction - experimental) and the paired effect
+size d_z, each with a 95 % bootstrap interval over proteins, for all proteins
+and for the proteins whose experimental structures are not flagged
+(experimental_structures: engineered variants, tags or propeptides, fibrils
+or designed cages).  Everything is descriptive: no hypothesis test is run.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, asdict, field
-from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 CATEGORY_EXP_VS_EXP = "exp_vs_exp"
 CATEGORY_EXP_VS_AF2 = "exp_vs_af2"
 CATEGORY_EXP_VS_OF3 = "exp_vs_of3"
 CATEGORY_AF2_VS_OF3 = "af2_vs_of3"
+CATEGORY_NMR_INTRA = "nmr_intra_ensemble"
 
-ALL_CATEGORIES = [
-    CATEGORY_EXP_VS_EXP,
-    CATEGORY_EXP_VS_AF2,
-    CATEGORY_EXP_VS_OF3,
-    CATEGORY_AF2_VS_OF3,
-]
+# Protein-level analysis: the three Machaon metrics, then RMSD for reference.
+METRICS = ["w_rdist_norm", "b_phipsi", "t_alpha", "rmsd"]
+EXPERIMENTAL_METHODS = ("X-ray", "NMR", "Cryo-EM")
+N_BOOT = 10_000
 
-METRIC_NAMES = [
-    "rmsd",
-    "t_alpha",
-    "w_rdist_raw",
-    "w_rdist_norm",
-    "b_phipsi",
-]
+# Flags for experimental structures that are not a plain copy of the UniProt protein
+MIN_IDENTITY = 0.90  # lower: engineered variant
+EXTRA_RESIDUES = 10  # residues not matching the UniProt sequence: tags, fusions
+STATE_PATTERN = r"\b(?:amyloid|fibrils?|filaments?|cages?)\b"  # title, whole words
+
+# Could a model have been trained on an experimental entry?
+AF2_TRAINING_CUTOFF = "2018-04-30"  # AF2: PDB entries released up to this date
+OF3_TRAINING_CUTOFF = "2021-09-30"  # OF3: PDB entries deposited before this date
 
 
 def infer_category(method_a: str, method_b: str) -> str:
@@ -76,484 +83,476 @@ def infer_category(method_a: str, method_b: str) -> str:
     return CATEGORY_EXP_VS_EXP
 
 
-@dataclass
-class CategoryStats:
-    """Descriptive statistics for one metric in one comparison category."""
-
-    category: str
-    metric: str
-    n: int = 0
-    mean: float = float("nan")
-    std: float = float("nan")
-    min_val: float = float("nan")
-    max_val: float = float("nan")
-    values: list[float] = field(default_factory=list, repr=False)
-
-    def to_dict(self) -> dict:
-        d = asdict(self)
-        d.pop("values")
-        return d
+# ---------------------------------------------------------------------------
+# Protein-level analysis
+# ---------------------------------------------------------------------------
 
 
-def compute_category_stats(records: list[dict]) -> dict[str, dict[str, CategoryStats]]:
+def _values(records: list[dict], metric: str) -> list[float]:
+    """The finite values of one metric in a list of records."""
+    out = []
+    for r in records:
+        v = r.get(metric)
+        if v is not None and np.isfinite(float(v)):
+            out.append(float(v))
+    return out
+
+
+def _median(records: list[dict], metric: str) -> float:
+    vals = _values(records, metric)
+    return float(np.median(vals)) if vals else np.nan
+
+
+def _max(records: list[dict], metric: str) -> float:
+    vals = _values(records, metric)
+    return float(np.max(vals)) if vals else np.nan
+
+
+def _methods(record: dict) -> tuple[str, str]:
+    """The methods of sides a and b, from the record's label, e.g. "NMR_vs_AF2"."""
+    method_a, _, method_b = record.get("comparison", "").partition("_vs_")
+    return method_a, method_b
+
+
+def _experimental_side(record: dict) -> str:
+    """'a' or 'b': which side of a record is the experimental structure."""
+    return "a" if _methods(record)[0] in EXPERIMENTAL_METHODS else "b"
+
+
+def experimental_structures(records: list[dict]) -> pd.DataFrame:
     """
-    Compute per-category, per-metric descriptive statistics.
+    One row per experimental structure, described through its comparison with
+    the AF2 model, whose sequence is the UniProt sequence (with the OF3 model
+    when a protein has no AF2 comparison):
 
-    Parameters
-    ----------
-    records : list of comparison records with 'category' and metric fields.
+      identity        sequence identity over the aligned residues
+      extra_residues  residues of the experimental chain that are not an
+                      identical match to the UniProt sequence: expression tags,
+                      fused parts, mutations (a tag that replaces unmodelled
+                      residues is aligned as mismatches, not gaps)
+      n_polymer_chains, title, release/deposition date of the entry
 
-    Returns
-    -------
-    Nested dict: stats[category][metric] = CategoryStats
+    and the flags (a flagged structure is not a plain copy of the UniProt protein):
+
+      flag_identity  identity < MIN_IDENTITY          (engineered variant)
+      flag_extra     extra_residues >= EXTRA_RESIDUES  (tags, fusion)
+      flag_state     title matches STATE_PATTERN       (amyloid, fibril, filament, cage)
     """
-    bucket: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-
-    for rec in records:
-        cat = rec.get("category", "unknown")
-        for m in METRIC_NAMES:
-            val = rec.get(m)
-            if val is not None:
-                try:
-                    fval = float(val)
-                    if not np.isnan(fval):
-                        bucket[cat][m].append(fval)
-                except (TypeError, ValueError):
-                    pass
-
-    stats: dict[str, dict[str, CategoryStats]] = {}
-    for cat, metrics in bucket.items():
-        stats[cat] = {}
-        for m, vals in metrics.items():
-            arr = np.array(vals)
-            stats[cat][m] = CategoryStats(
-                category=cat,
-                metric=m,
-                n=len(arr),
-                mean=float(np.mean(arr)),
-                std=float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
-                min_val=float(np.min(arr)),
-                max_val=float(np.max(arr)),
-                values=vals,
-            )
-
-    return stats
-
-
-def cohens_d(group_a: list[float], group_b: list[float]) -> Optional[float]:
-    """
-    Cohen's d effect size: (mean_a - mean_b) / pooled_std.
-
-    Uses the n-weighted pooled standard deviation, which handles unequal group
-    sizes correctly. Returns None if either group has fewer than 2 values.
-
-    With small datasets, treat all results as highly uncertain directional signals.
-    Do not interpret as inferential statistics.
-    """
-    if len(group_a) < 2 or len(group_b) < 2:
-        return None
-    a, b = np.array(group_a, dtype=float), np.array(group_b, dtype=float)
-    n1, n2 = len(a), len(b)
-    pooled_std = np.sqrt(
-        ((n1 - 1) * np.var(a, ddof=1) + (n2 - 1) * np.var(b, ddof=1)) / (n1 + n2 - 2)
-    )
-    if pooled_std < 1e-12:
-        return 0.0
-    return float((np.mean(a) - np.mean(b)) / pooled_std)
-
-
-def within_range_check(
-    ai_val: float,
-    exp_mean: float,
-    exp_std: float,
-    n_std: float = 1.0,
-) -> bool:
-    """
-    Return True if ai_val falls within exp_mean +/- n_std * exp_std.
-
-    This is an operational comparison, not a statistical test. It answers
-    whether the AI deviation is comparable in scale to the experimental spread,
-    not whether the two distributions are statistically indistinguishable.
-    """
-    return abs(ai_val - exp_mean) <= n_std * exp_std
-
-
-def _safe_mean(records: list[dict], key: str) -> Optional[float]:
-    """Return the mean of records[key] over non-None entries, or None."""
-    vals = [r[key] for r in records if r.get(key) is not None]
-    return float(np.mean(vals)) if vals else None
-
-
-def generate_per_protein_interpretation(
-    protein: str,
-    p_records: list[dict],
-    exp_exp: list[dict],
-    ai_exp: list[dict],
-) -> dict:
-    """
-    Generate a structured interpretation summary for one protein.
-
-    Covers: which AI model is closest by mean RMSD, whether AI metrics fall
-    within the experimental baseline, which experimental method shows the
-    highest deviation from AI, and a note on pLDDT confidence.
-
-    All conclusions are qualified by sample size.
-    """
-    interp: dict = {
-        "protein": protein,
-        "n_exp_vs_exp": len(exp_exp),
-        "n_ai_vs_exp": len(ai_exp),
-        "caveats": [],
+    columns = [
+        "protein_name",
+        "uniprot_id",
+        "method",
+        "pdb_id",
+        "chain",
+        "n_residues",
+        "identity",
+        "extra_residues",
+        "n_polymer_chains",
+        "release_date",
+        "deposition_date",
+        "title",
+    ]
+    ok = [r for r in records if r.get("status", "ok") == "ok"]
+    with_af2 = {
+        r["protein_name"] for r in ok if r.get("category") == CATEGORY_EXP_VS_AF2
     }
-
-    if len(exp_exp) < 2:
-        interp["caveats"].append(
-            f"Only {len(exp_exp)} exp-vs-exp comparison(s) available. "
-            "The +/-1 sigma within-range check requires >= 2 for a meaningful standard deviation."
+    rows = []
+    for r in ok:
+        category = r.get("category")
+        if not (
+            category == CATEGORY_EXP_VS_AF2
+            or (category == CATEGORY_EXP_VS_OF3 and r["protein_name"] not in with_af2)
+        ):
+            continue
+        s = _experimental_side(r)
+        n_residues = int(r.get(f"n_residues_{s}") or 0)
+        identical = int(r.get("n_matched") or 0) - int(r.get("n_mismatches") or 0)
+        rows.append(
+            {
+                "protein_name": r["protein_name"],
+                "uniprot_id": r.get("uniprot_id"),
+                "method": _methods(r)[0 if s == "a" else 1],
+                "pdb_id": r.get(f"pdb_id_{s}"),
+                "chain": r.get(f"chain_id_{s}"),
+                "n_residues": n_residues,
+                "identity": r.get("seq_identity"),
+                "extra_residues": n_residues - identical,
+                "n_polymer_chains": r.get(f"n_polymer_chains_{s}"),
+                "release_date": r.get(f"release_date_{s}") or "",
+                "deposition_date": r.get(f"deposition_date_{s}") or "",
+                "title": r.get(f"title_{s}") or "",
+            }
         )
+    df = pd.DataFrame(rows, columns=columns)
+    df["identity"] = pd.to_numeric(df["identity"])
+    df["flag_identity"] = df["identity"] < MIN_IDENTITY
+    df["flag_extra"] = df["extra_residues"] >= EXTRA_RESIDUES
+    df["flag_state"] = df["title"].str.contains(STATE_PATTERN, case=False, regex=True)
+    df["flagged"] = df[["flag_identity", "flag_extra", "flag_state"]].any(axis=1)
+    # could the models have been trained on this entry? (see the cutoff constants)
+    released = df["release_date"].ne("")
+    deposited = df["deposition_date"].ne("")
+    df["before_af2_cutoff"] = released & (df["release_date"] <= AF2_TRAINING_CUTOFF)
+    df["before_of3_cutoff"] = deposited & (df["deposition_date"] < OF3_TRAINING_CUTOFF)
+    return df
 
-    # Which AI model is closest to experimental structures by mean RMSD?
-    af2_exp = [r for r in ai_exp if "AF2" in r.get("comparison", "")]
-    of3_exp = [r for r in ai_exp if "OF3" in r.get("comparison", "")]
 
-    mean_af2 = _safe_mean(af2_exp, "rmsd")
-    mean_of3 = _safe_mean(of3_exp, "rmsd")
+def training_overlap(structures: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per protein: could the models have seen it during training?
 
-    if mean_af2 is not None and mean_of3 is not None:
-        closer = "AF2" if mean_af2 < mean_of3 else "OF3"
-        interp["closest_ai_by_mean_rmsd"] = {
-            "winner": closer,
-            "mean_rmsd_af2": round(mean_af2, 4),
-            "mean_rmsd_of3": round(mean_of3, 4),
-            "note": (
-                f"Based on N={len(ai_exp)} AI-vs-exp comparisons. "
-                "Treat as a directional signal only."
-            ),
+    `structures` has one row per experimental structure with protein_name,
+    release_date, deposition_date and the flags before_af2_cutoff /
+    before_of3_cutoff (experimental_structures() or dataset.describe_structures()).
+
+      n_structures   experimental structures of the protein in this dataset
+      n_before_af2   of them released on or before the AF2 training cutoff
+      n_before_of3   of them deposited before the OF3 training cutoff
+      seen_af2       at least one structure public before the AF2 cutoff
+      seen_of3       at least one structure deposited before the OF3 cutoff
+      dated          every structure of the protein has a known date
+
+    A "seen" protein may have been in the model's training data, so agreement
+    with its experimental structures can partly be recall rather than
+    prediction.  Only the structures in this dataset are counted; other PDB
+    entries of the same protein can only turn an "unseen" protein into a
+    "seen" one, so the number of unseen proteins is an upper bound.
+    """
+    if structures.empty:
+        return pd.DataFrame(
+            columns=[
+                "protein_name",
+                "n_structures",
+                "n_before_af2",
+                "n_before_of3",
+                "seen_af2",
+                "seen_of3",
+                "dated",
+            ]
+        )
+    s = structures.copy()
+    for column in ("release_date", "deposition_date"):
+        s[column] = s[column].fillna("").astype(str)
+    s["dated"] = s["release_date"].ne("") & s["deposition_date"].ne("")
+    out = s.groupby("protein_name").agg(
+        n_structures=("pdb_id", "size"),
+        n_before_af2=("before_af2_cutoff", "sum"),
+        n_before_of3=("before_of3_cutoff", "sum"),
+        dated=("dated", "all"),
+    )
+    out["n_before_af2"] = out["n_before_af2"].astype(int)
+    out["n_before_of3"] = out["n_before_of3"].astype(int)
+    out["seen_af2"] = out["n_before_af2"] > 0
+    out["seen_of3"] = out["n_before_of3"] > 0
+    return out.reset_index()[
+        [
+            "protein_name",
+            "n_structures",
+            "n_before_af2",
+            "n_before_of3",
+            "seen_af2",
+            "seen_of3",
+            "dated",
+        ]
+    ]
+
+
+def protein_table(records: list[dict]) -> pd.DataFrame:
+    """
+    One row per protein.  For every metric m (columns "<m>__<quantity>"):
+
+      exp          median over the experimental pairs (1 or 3): experimental variability
+      af2, of3     median over prediction-vs-experimental pairs (2 or 3)
+      af2_of3      AF2 vs OF3
+      nmr_ens      median distance representative NMR model -> other models;
+                   nmr_ens_max its maximum
+      nmr_af2, nmr_of3   distance representative NMR model -> prediction
+
+    plus covariates (length and mean pLDDT of each prediction, OF3 MSA depth,
+    chains in the cryo-EM entry, X-ray available) and the flags of the
+    protein's experimental structures.  Needs the NMR
+    intra-ensemble records too (they give nmr_ens).
+    """
+    by_protein: dict[str, list[dict]] = defaultdict(list)
+    for r in records:
+        if r.get("status", "ok") == "ok":
+            by_protein[r["protein_name"]].append(r)
+
+    structures = experimental_structures(records)
+    flags = structures.groupby("protein_name")[
+        ["flag_identity", "flag_extra", "flag_state", "flagged"]
+    ].any()
+    cryoem_chains = (
+        structures[structures["method"] == "Cryo-EM"]
+        .groupby("protein_name")["n_polymer_chains"]
+        .max()
+    )
+
+    rows = []
+    for protein, recs in sorted(by_protein.items()):
+        group = defaultdict(list)
+        for r in recs:
+            group[r.get("category")].append(r)
+        af2 = group[CATEGORY_EXP_VS_AF2]
+        of3 = group[CATEGORY_EXP_VS_OF3]
+        nmr_af2 = [r for r in af2 if "NMR" in _methods(r)]
+        nmr_of3 = [r for r in of3 if "NMR" in _methods(r)]
+        predicted = af2 or of3  # both are the whole UniProt sequence
+        methods = {
+            m for r in predicted for m in _methods(r) if m in EXPERIMENTAL_METHODS
         }
-    elif mean_af2 is not None:
-        interp["closest_ai_by_mean_rmsd"] = {
-            "winner": "AF2 only (OF3 not available)",
-            "mean_rmsd_af2": round(mean_af2, 4),
+
+        row: dict = {
+            "protein_name": protein,
+            "uniprot_id": recs[0].get("uniprot_id"),
+            "has_xray": "X-ray" in methods,
+            "n_experimental": len(methods),
+            "length": predicted[0].get("n_residues_b") if predicted else np.nan,
+            "plddt_af2": af2[0].get("plddt_mean_b") if af2 else np.nan,
+            "plddt_of3": of3[0].get("plddt_mean_b") if of3 else np.nan,
+            "msa_depth_of3": of3[0].get("msa_depth_b") if of3 else np.nan,
+            "cryoem_chains": cryoem_chains.get(protein, np.nan),
         }
-    elif mean_of3 is not None:
-        interp["closest_ai_by_mean_rmsd"] = {
-            "winner": "OF3 only (AF2 not available)",
-            "mean_rmsd_of3": round(mean_of3, 4),
-        }
-    else:
-        interp["closest_ai_by_mean_rmsd"] = None
+        for m in METRICS:
+            row[f"{m}__exp"] = _median(group[CATEGORY_EXP_VS_EXP], m)
+            row[f"{m}__af2"] = _median(af2, m)
+            row[f"{m}__of3"] = _median(of3, m)
+            row[f"{m}__af2_of3"] = _median(group[CATEGORY_AF2_VS_OF3], m)
+            row[f"{m}__nmr_ens"] = _median(group[CATEGORY_NMR_INTRA], m)
+            row[f"{m}__nmr_ens_max"] = _max(group[CATEGORY_NMR_INTRA], m)
+            row[f"{m}__nmr_af2"] = _median(nmr_af2, m)
+            row[f"{m}__nmr_of3"] = _median(nmr_of3, m)
+        for flag in ("flag_identity", "flag_extra", "flag_state", "flagged"):
+            row[flag] = bool(flags[flag].get(protein, False)) if len(flags) else False
+        rows.append(row)
 
-    # Within-range check against experimental baseline
-    if exp_exp and ai_exp:
-        within_summary: dict = {}
-        for m in METRIC_NAMES:
-            exp_vals = [r[m] for r in exp_exp if r.get(m) is not None]
-            ai_vals = [r[m] for r in ai_exp if r.get(m) is not None]
-            if not exp_vals or not ai_vals:
-                continue
+    return pd.DataFrame(rows)
 
-            exp_mean = float(np.mean(exp_vals))
-            exp_std = float(np.std(exp_vals, ddof=1)) if len(exp_vals) > 1 else 0.0
 
-            if len(exp_vals) < 2:
-                within_summary[m] = {
-                    "exp_mean": exp_mean,
-                    "exp_std": None,
-                    "all_within_1std": None,
-                    "note": "Only 1 exp-vs-exp baseline; +/-1 sigma check not applicable.",
-                }
-            else:
-                within_flags = [
-                    within_range_check(v, exp_mean, exp_std) for v in ai_vals
-                ]
-                within_summary[m] = {
-                    "exp_mean": round(exp_mean, 4),
-                    "exp_std": round(exp_std, 4),
-                    "ai_values": [round(v, 4) for v in ai_vals],
-                    "all_within_1std": all(within_flags),
-                    "n_within": sum(within_flags),
-                    "n_ai_compared": len(within_flags),
-                }
+def _mean(x: np.ndarray, axis=None):
+    return np.mean(x, axis=axis)
 
-        interp["within_range_check"] = within_summary
 
-    # Which experimental method shows the highest deviation from AI?
-    if ai_exp:
-        by_method: dict[str, list[float]] = defaultdict(list)
-        for r in ai_exp:
-            is_af_a = r.get("is_af_a", False)
-            exp_method = r.get("method_b") if is_af_a else r.get("method_a")
-            if exp_method and r.get("rmsd") is not None:
-                by_method[exp_method].append(r["rmsd"])
+def _paired_dz(x: np.ndarray, axis=None):
+    """Paired effect size d_z = mean / standard deviation of the differences."""
+    mean = np.mean(x, axis=axis)
+    sd = np.std(x, axis=axis, ddof=1)
+    tiny = sd <= 1e-12 * np.maximum(1.0, np.abs(mean))  # all values equal: undefined
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d = mean / sd
+    return np.where(tiny | ~np.isfinite(d), np.nan, d)
 
-        if len(by_method) > 1:
-            method_means = {m: float(np.mean(v)) for m, v in by_method.items() if v}
-            highest = max(method_means, key=method_means.get)
-            interp["exp_method_divergence"] = {
-                "method_mean_rmsd": {m: round(v, 4) for m, v in method_means.items()},
-                "highest_deviation_method": highest,
-                "note": (
-                    f"'{highest}' structures show the largest mean RMSD against AI. "
-                    "This may reflect method-specific characteristics (e.g. crystal "
-                    "packing for X-ray, solution dynamics for NMR) rather than AI "
-                    "prediction quality alone."
+
+def bootstrap_ci(
+    values,
+    statistic=np.median,
+    n_boot: int = N_BOOT,
+    seed: int = 0,
+    level: float = 0.95,
+) -> tuple[float, float, float]:
+    """
+    Estimate and percentile bootstrap interval of statistic(values).
+
+    `values` has one entry per protein; the proteins are resampled with
+    replacement n_boot times (fixed seed: the same numbers on every run).
+    `statistic` must accept an `axis` argument (np.median, np.mean, ...).
+    Returns (estimate, low, high); low/high are NaN with fewer than 2 values.
+    """
+    x = np.asarray(values, dtype=float)
+    x = x[np.isfinite(x)]
+    if len(x) == 0:
+        return np.nan, np.nan, np.nan
+    estimate = float(statistic(x))
+    if len(x) < 2:
+        return estimate, np.nan, np.nan
+    rng = np.random.default_rng(seed)
+    samples = statistic(x[rng.integers(0, len(x), size=(n_boot, len(x)))], axis=1)
+    samples = np.asarray(samples, dtype=float)
+    if not np.isfinite(samples).any():  # e.g. d_z of identical values
+        return estimate, np.nan, np.nan
+    low, high = np.nanpercentile(samples, [50 * (1 - level), 50 * (1 + level)])
+    return estimate, float(low), float(high)
+
+
+def summarise_proteins(table: pd.DataFrame, n_boot: int = N_BOOT) -> pd.DataFrame:
+    """
+    Across proteins, for each metric and prediction (AF2, OF3), on all proteins
+    and on the unflagged ("clean") ones:
+
+      n                 proteins with a value
+      within_exp        fraction with prediction <= experimental variability
+                        (prediction no farther from the experiments than they
+                        are from each other)
+      median_diff       median of (prediction - experimental), metric units
+      d_z               paired effect size of (prediction - experimental)
+      inside_nmr        fraction with d(NMR representative, prediction) <= the
+                        largest d(NMR representative, other model): no farther
+                        from the representative than the farthest model of its
+                        own ensemble (n_nmr proteins: those whose NMR entry has
+                        more than one model)
+      af2_closer        (row "AF2 vs OF3") fraction where AF2 is closer to the
+                        experiments than OF3; median_diff = median(OF3 - AF2)
+
+    Every value comes with a 95 % bootstrap interval (<name>_lo, <name>_hi).
+    """
+    rows = []
+    subsets = [("all", table), ("clean", table[~table["flagged"].astype(bool)])]
+    for subset, sub in subsets:
+        for m in METRICS:
+            for pred in ("af2", "of3"):
+                diff = (sub[f"{m}__{pred}"] - sub[f"{m}__exp"]).dropna().to_numpy()
+                ens = sub[[f"{m}__nmr_{pred}", f"{m}__nmr_ens_max"]].dropna()
+                inside = (ens.iloc[:, 0] <= ens.iloc[:, 1]).to_numpy(dtype=float)
+                row = {"subset": subset, "metric": m, "prediction": pred.upper()}
+                row["n"] = len(diff)
+                row["n_nmr"] = len(inside)  # proteins with an NMR ensemble (>1 model)
+                for name, values, stat in (
+                    ("within_exp", (diff <= 0).astype(float), _mean),
+                    ("median_diff", diff, np.median),
+                    ("d_z", diff, _paired_dz),
+                    ("inside_nmr", inside, _mean),
+                ):
+                    est, lo, hi = bootstrap_ci(values, stat, n_boot=n_boot)
+                    row.update({name: est, f"{name}_lo": lo, f"{name}_hi": hi})
+                rows.append(row)
+
+            diff = (sub[f"{m}__of3"] - sub[f"{m}__af2"]).dropna().to_numpy()
+            row = {"subset": subset, "metric": m, "prediction": "AF2 vs OF3"}
+            row["n"] = len(diff)
+            for name, values, stat in (
+                ("af2_closer", (diff > 0).astype(float), _mean),
+                ("median_diff", diff, np.median),
+            ):
+                est, lo, hi = bootstrap_ci(values, stat, n_boot=n_boot)
+                row.update({name: est, f"{name}_lo": lo, f"{name}_hi": hi})
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _interval(row: pd.Series, name: str, fmt: str = "{:.2f}") -> str:
+    """'0.62 [0.54, 0.70]' for one estimate and its interval."""
+    est = row.get(name)
+    if est is None or not np.isfinite(est):
+        return "-"
+    lo, hi = row.get(f"{name}_lo"), row.get(f"{name}_hi")
+    if lo is None or not np.isfinite(lo):
+        return fmt.format(est)
+    return f"{fmt.format(est)} [{fmt.format(lo)}, {fmt.format(hi)}]"
+
+
+def format_summary(summary: pd.DataFrame, subset: str = "all") -> pd.DataFrame:
+    """The summarise_proteins() table as readable strings, one subset."""
+    out = []
+    for _, row in summary[summary["subset"] == subset].iterrows():
+        if row["prediction"] == "AF2 vs OF3":
+            continue
+        out.append(
+            {
+                "metric": row["metric"],
+                "prediction": row["prediction"],
+                "n": int(row["n"]),
+                "within experimental variability": _interval(row, "within_exp"),
+                "median (prediction - experimental)": _interval(
+                    row, "median_diff", "{:.3g}"
                 ),
+                "d_z": _interval(row, "d_z"),
+                "inside NMR ensemble": _interval(row, "inside_nmr"),
+                "n (NMR ensemble)": int(row["n_nmr"]),
             }
-        else:
-            interp["exp_method_divergence"] = {
-                "note": "Only one experimental method available; method comparison not applicable."
-            }
+        )
+    return pd.DataFrame(out)
 
-    # pLDDT and low-confidence region note
-    plddt_pairs = []
-    for r in ai_exp:
-        p = r.get("plddt_matched_b") if r.get("is_af_b") else r.get("plddt_matched_a")
-        if p is not None and r.get("rmsd") is not None:
-            plddt_pairs.append((float(p), float(r["rmsd"])))
 
-    if plddt_pairs:
-        low_conf = [(p, r) for p, r in plddt_pairs if p < 70]
-        interp["plddt_analysis"] = {
-            "n_comparisons_with_plddt": len(plddt_pairs),
-            "n_low_confidence_plddt": len(low_conf),
-            "note": (
-                f"{len(low_conf)} of {len(plddt_pairs)} AI-vs-exp comparison(s) "
-                "involve matched regions with mean pLDDT < 70 (low confidence). "
-                + (
-                    "Deviations in low-pLDDT regions may reflect genuine structural "
-                    "disorder rather than prediction error. Interpret RMSD and t-alpha "
-                    "values cautiously for these comparisons."
-                    if low_conf
-                    else "All matched regions have mean pLDDT >= 70; confidence is acceptable."
-                )
-            ),
-        }
-    else:
-        interp["plddt_analysis"] = {
-            "note": "pLDDT data not available or not confirmed for this protein's AI structures."
-        }
-
-    return interp
+def _to_json_rows(df: pd.DataFrame) -> list[dict]:
+    """DataFrame -> list of dicts with NaN replaced by None (valid JSON)."""
+    return df.astype(object).where(df.notna(), None).to_dict(orient="records")
 
 
 def analyse(records: list[dict]) -> dict:
     """
-    Full statistical analysis over a set of comparison records.
+    Protein-level analysis of all comparison records (status "ok"), including
+    the NMR intra-ensemble records.
 
-    Parameters
-    ----------
-    records : list of dicts from pipeline.py, status = "ok" only.
-        NMR intra-ensemble records should be excluded before calling
-        (filter on category != "nmr_intra_ensemble").
-
-    Returns
-    -------
-    dict with keys:
-      category_stats, effect_sizes, variance_ratios, per_protein,
-      per_protein_interpretation, summary_text
+    Returns a JSON-serialisable dict:
+      experimental_structures  one row per experimental structure, with flags
+      per_protein              protein_table() rows
+      summary                  summarise_proteins() rows
+      summary_text             printable summary (print_summary)
     """
-    stats = compute_category_stats(records)
-    baseline = stats.get(CATEGORY_EXP_VS_EXP, {})
+    structures = experimental_structures(records)
+    table = protein_table(records)
+    summary = summarise_proteins(table) if len(table) else pd.DataFrame()
 
-    effect_sizes: dict[str, dict[str, Optional[float]]] = {}
-    for ai_cat in [CATEGORY_EXP_VS_AF2, CATEGORY_EXP_VS_OF3, CATEGORY_AF2_VS_OF3]:
-        ai_stats = stats.get(ai_cat, {})
-        effect_sizes[ai_cat] = {
-            m: (
-                cohens_d(baseline[m].values, ai_stats[m].values)
-                if m in baseline and m in ai_stats
-                else None
-            )
-            for m in METRIC_NAMES
-        }
-
-    variance_ratios: dict[str, dict[str, Optional[float]]] = {}
-    for ai_cat in [CATEGORY_EXP_VS_AF2, CATEGORY_EXP_VS_OF3]:
-        ai_stats = stats.get(ai_cat, {})
-        variance_ratios[ai_cat] = {}
-        for m in METRIC_NAMES:
-            if (
-                m in baseline
-                and m in ai_stats
-                and len(baseline[m].values) > 1
-                and len(ai_stats[m].values) > 1
-            ):
-                var_b = np.var(baseline[m].values, ddof=1)
-                var_ai = np.var(ai_stats[m].values, ddof=1)
-                variance_ratios[ai_cat][m] = (
-                    float(var_ai / var_b) if var_b > 1e-12 else None
-                )
-            else:
-                variance_ratios[ai_cat][m] = None
-
-    proteins = sorted({r["protein_name"] for r in records})
-    per_protein: dict[str, dict] = {}
-    per_protein_interpretation: dict[str, dict] = {}
-
-    for protein in proteins:
-        p_records = [r for r in records if r["protein_name"] == protein]
-        exp_exp = [r for r in p_records if r.get("category") == CATEGORY_EXP_VS_EXP]
-        ai_exp = [
-            r
-            for r in p_records
-            if r.get("category") in (CATEGORY_EXP_VS_AF2, CATEGORY_EXP_VS_OF3)
-        ]
-
-        per_protein[protein] = {
-            "n_exp_vs_exp": len(exp_exp),
-            "n_ai_vs_exp": len(ai_exp),
-        }
-
-        if exp_exp and ai_exp:
-            wr: dict = {}
-            for m in METRIC_NAMES:
-                exp_vals = [r[m] for r in exp_exp if r.get(m) is not None]
-                ai_vals = [r[m] for r in ai_exp if r.get(m) is not None]
-                if not exp_vals:
-                    continue
-                exp_mean = float(np.mean(exp_vals))
-                exp_std = float(np.std(exp_vals, ddof=1)) if len(exp_vals) > 1 else 0.0
-                if len(exp_vals) < 2:
-                    wr[m] = {
-                        "exp_mean": exp_mean,
-                        "exp_n": len(exp_vals),
-                        "ai_values": ai_vals,
-                        "all_within_1std": None,
-                        "note": "Only 1 exp-vs-exp baseline — +/-1 sigma check not applicable.",
-                    }
-                else:
-                    within_flags = {
-                        f"ai_{i}": within_range_check(v, exp_mean, exp_std)
-                        for i, v in enumerate(ai_vals)
-                    }
-                    wr[m] = {
-                        "exp_mean": exp_mean,
-                        "exp_std": exp_std,
-                        "exp_n": len(exp_vals),
-                        "ai_values": ai_vals,
-                        "within_flags": within_flags,
-                        "all_within_1std": (
-                            all(within_flags.values()) if within_flags else None
-                        ),
-                    }
-            per_protein[protein]["within_range"] = wr
-
-        per_protein_interpretation[protein] = generate_per_protein_interpretation(
-            protein, p_records, exp_exp, ai_exp
-        )
-
-    # Build printable summary
+    n_flagged = int(table["flagged"].sum()) if len(table) else 0
     lines = [
-        "=" * 70,
-        "STATISTICAL ANALYSIS SUMMARY",
-        "=" * 70,
-        "",
-        "IMPORTANT CAVEATS",
-        "-" * 70,
-        f"  Dataset: N = {len(proteins)} proteins. ALL statistics are DESCRIPTIVE, not inferential.",
-        "  Cohen's d and variance ratios serve as directional signals only.",
-        "  The within-range check is an operational comparison, not a significance test.",
-        "  'AI within experimental variability' is a necessary but NOT sufficient",
-        "  condition for claiming AI replaces experimental structure determination.",
-        "  NMR intra-ensemble variability reflects solution-state dynamics, not",
-        "  measurement error — it is NOT directly comparable to X-ray/Cryo-EM spread.",
-        "  Scope: chain-level only. Assembly-level conclusions not supported.",
-        "-" * 70,
-        "",
-        f"Total comparison records analysed (status='ok'): {len(records)}",
-        "",
+        "=" * 78,
+        "PROTEIN-LEVEL SUMMARY  (descriptive; 95 % bootstrap intervals over proteins)",
+        "=" * 78,
+        f"Proteins: {len(table)}   flagged: {n_flagged}   clean: {len(table) - n_flagged}",
     ]
-
-    for cat, m_stats in stats.items():
-        if cat == "nmr_intra_ensemble":
-            continue
-        n_vals = next(iter(m_stats.values())).n if m_stats else 0
-        lines.append(f"Category: {cat}  (n_comparisons={n_vals})")
-        for m, s in m_stats.items():
-            lines.append(
-                f"  {m:20s}: mean={s.mean:.4f}  std={s.std:.4f}  "
-                f"range=[{s.min_val:.4f}, {s.max_val:.4f}]"
+    if len(table):
+        lines.append(
+            "  flags: low identity {}, extra residues {}, fibril/cage title {}".format(
+                int(table["flag_identity"].sum()),
+                int(table["flag_extra"].sum()),
+                int(table["flag_state"].sum()),
             )
-        lines.append("")
-
-    lines.append("Effect sizes (Cohen's d) vs exp_vs_exp baseline")
-    lines.append(
-        f"  [n-weighted pooled std; directional signals only at N = {len(proteins)}]"
-    )
-    for ai_cat, metrics in effect_sizes.items():
-        if not any(v is not None for v in metrics.values()):
-            continue
-        lines.append(f"  {ai_cat}:")
-        for m, d in metrics.items():
-            if d is not None:
-                size_label = (
-                    "large" if abs(d) >= 0.8 else "medium" if abs(d) >= 0.5 else "small"
-                )
-                lines.append(f"    {m:20s}: d={d:+.3f}  ({size_label})")
-    lines.append("")
-
-    lines.append(
-        "Per-protein within-range check  [AI value within exp_vs_exp +/- 1 sigma]"
-    )
-    lines.append("  checkmark = within, x = outside, dash = only 1 baseline pair")
-    for protein, info in per_protein.items():
-        wr = info.get("within_range", {})
-        if not wr:
-            lines.append(f"  {protein}: insufficient exp-vs-exp baseline")
-            continue
-        flags = []
-        for m, d in wr.items():
-            aw = d.get("all_within_1std")
-            symbol = "-" if aw is None else ("ok" if aw else "outside")
-            flags.append(f"{m}={symbol}")
-        lines.append(f"  {protein}: {', '.join(flags)}")
-
+        )
     lines += [
         "",
-        "Per-protein summaries: see per_protein_interpretation",
-        "NMR flexibility baselines: see nmr_variability.json",
-        "",
-        "=" * 70,
+        "within exp = fraction of proteins whose prediction is no farther from the",
+        "  experimental structures than they are from each other (median distances).",
+        "inside NMR = fraction whose prediction is no farther from the representative",
+        "  NMR model than the farthest other model of the same ensemble (n NMR =",
+        "  proteins whose NMR entry has more than one model).",
+        "median diff = median over proteins of (prediction - experimental).",
     ]
+    for subset in ("all", "clean"):
+        if summary.empty:
+            break
+        lines += ["", f"--- {subset} proteins ---"]
+        lines.append(
+            f"{'metric':<13} {'pred':<4} {'n':>4}  {'within exp':<19} "
+            f"{'median diff':<26} {'inside NMR':<19} {'n NMR':>5}"
+        )
+        for _, row in summary[summary["subset"] == subset].iterrows():
+            if row["prediction"] == "AF2 vs OF3":
+                lines.append(
+                    f"{row['metric']:<13} AF2 closer than OF3 in "
+                    f"{_interval(row, 'af2_closer')} of {int(row['n'])} proteins"
+                )
+                continue
+            lines.append(
+                f"{row['metric']:<13} {row['prediction']:<4} {int(row['n']):>4}  "
+                f"{_interval(row, 'within_exp'):<19} "
+                f"{_interval(row, 'median_diff', '{:.3g}'):<26} "
+                f"{_interval(row, 'inside_nmr'):<19} {int(row['n_nmr']):>5}"
+            )
+    lines.append("=" * 78)
 
     return {
-        "category_stats": {
-            cat: {m: s.to_dict() for m, s in m_map.items()}
-            for cat, m_map in stats.items()
-        },
-        "effect_sizes": effect_sizes,
-        "variance_ratios": variance_ratios,
-        "per_protein": per_protein,
-        "per_protein_interpretation": per_protein_interpretation,
+        "experimental_structures": _to_json_rows(structures),
+        "per_protein": _to_json_rows(table),
+        "summary": _to_json_rows(summary),
         "summary_text": "\n".join(lines),
     }
 
 
-def print_summary(analysis_result: dict) -> None:
-    """Print the summary text from an analyse() result."""
-    print(analysis_result["summary_text"])
-
-
 def summarise_rejections(rejected_records: list[dict]) -> dict:
     """
-    Categorise and count rejected / failed comparison records for reporting.
-
-    Returns a structured summary suitable for embedding in the thesis methods
-    section as an "Exclusion criteria / rejected comparisons" table.
+    Count rejected and failed comparison records by status and by reason.
 
     Parameters
     ----------
-    rejected_records : list of dicts from pipeline.py (status != "ok").
+    rejected_records : records from pipeline.py with status != "ok".
 
     Returns
     -------
     dict with:
-      total                : int   — total rejected records
-      by_status            : dict  — counts per status string ("rejected", "metric_error")
-      by_rejection_class   : dict  — counts per high-level rejection class
-      proteins_with_any_ok : int   — proteins that have at least one successful comparison
-      proteins_all_rejected: list  — protein names where every comparison failed
-      printable_summary    : str   — human-readable table for the report
+      total              : int  — number of records
+      by_status          : dict — counts per status ("rejected", "metric_error")
+      by_rejection_class : dict — counts per reason class (CLASS_PATTERNS, else "other")
+      printable_summary  : str  — the same as a text table
     """
     import re
 
@@ -564,36 +563,22 @@ def summarise_rejections(rejected_records: list[dict]) -> dict:
         s = r.get("status", "unknown")
         by_status[s] = by_status.get(s, 0) + 1
 
-    # Classify each rejection reason into a high-level category
+    # the reasons written by alignment.align_pair and pipeline.compare_pair
     CLASS_PATTERNS = [
-        ("coverage_failure", r"coverage.*below|below.*coverage"),
-        ("too_few_residues", r"Only \d+ residues matched|Fewer than"),
-        ("identity_below", r"Sequence identity.*below"),
-        ("parse_error", r"Failed to parse|parse.*error"),
+        ("parse_error", r"Failed to parse"),
+        ("too_few_residues", r"has only \d+ Cα residues"),
+        ("alignment_error", r"Sequence alignment failed"),
         ("metric_error", r"Metric computation failed"),
-        ("missing_file", r"not found|No such file"),
-        ("chain_error", r"chain.*not found|No chain"),
     ]
 
     by_class: dict[str, int] = {}
     for r in rejected_records:
-        reason = (r.get("rejection_reason") or r.get("reason") or "").lower()
-        matched = False
-        for label, pattern in CLASS_PATTERNS:
-            if re.search(pattern, reason, re.IGNORECASE):
-                by_class[label] = by_class.get(label, 0) + 1
-                matched = True
-                break
-        if not matched:
-            by_class["other"] = by_class.get("other", 0) + 1
-
-    # Per-protein summary
-    ok_proteins: set[str] = set()
-    all_proteins: set[str] = set()
-    for r in rejected_records:
-        all_proteins.add(r.get("protein_name", "unknown"))
-
-    proteins_all_rejected = sorted(all_proteins)  # default (overridden below)
+        reason = r.get("rejection_reason") or r.get("reason") or ""
+        label = next(
+            (name for name, pattern in CLASS_PATTERNS if re.search(pattern, reason)),
+            "other",
+        )
+        by_class[label] = by_class.get(label, 0) + 1
 
     lines = [
         "=" * 60,
@@ -611,9 +596,9 @@ def summarise_rejections(rejected_records: list[dict]) -> dict:
         lines.append(f"  {cls:<25s}: {n}")
     lines += [
         "",
-        "Note: 'coverage_failure' is the dominant class.  This reflects the",
-        "80% per-structure coverage threshold, which correctly excludes fragment-",
-        "vs-full and domain-vs-full comparisons that would produce misleading metrics.",
+        "Note: pairs are rejected only when a structure cannot be read",
+        "(parse errors, missing chain or model, < 5 residues).  Coverage and",
+        "identity are reported as warnings, not used to reject pairs.",
         "=" * 60,
     ]
 

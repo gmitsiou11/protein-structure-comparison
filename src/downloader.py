@@ -1,11 +1,7 @@
 """
-Download and acquire structure files from RCSB PDB, AlphaFold DB, and OpenFold3 (NVIDIA NIM).
+Download structure files from RCSB PDB and AlphaFold DB, and predict OpenFold3 models (NVIDIA NIM).
 
-Acquisition layers
-------------------
 Experimental structures
-  search_rcsb_by_uniprot()   Query the RCSB search API for all PDB entries linked
-                              to a UniProt accession, grouped by experimental method.
   download_rcsb()            Download a single mmCIF by PDB ID.
 
 AlphaFold2
@@ -14,15 +10,14 @@ AlphaFold2
 
 OpenFold3 (NVIDIA NIM)
   fetch_uniprot_sequence()   Retrieve the canonical amino acid sequence from UniProt.
-  predict_openfold3()        Submit a sequence to the NVIDIA NIM OpenFold3 endpoint
-                             and save the returned mmCIF.
+  fetch_msa()                Build the MSA of that sequence with the NVIDIA MSA Search
+                             NIM (ColabFold MMseqs2 search: UniRef30 + ColabFold
+                             environmental database) and cache it in data/msas/.
+  predict_openfold3()        Submit the sequence and its MSA to the NVIDIA NIM
+                             OpenFold3 endpoint and save the top-ranked mmCIF.
 
-Utilities
----------
-  load_proteins()            Read a two-column (name, UniProtID) text file into a
-                             list of tuples. Retained for ad-hoc scripting; the
-                             pipeline reads proteins.csv via pd.read_csv() directly.
-
+Recovery
+  download_missing_inputs()  Fetch the files listed in results/missing_inputs.csv.
 """
 
 from __future__ import annotations
@@ -37,224 +32,30 @@ from typing import Optional
 import gemmi
 import requests
 
-_RCSB_SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
-_RCSB_GRAPHQL_URL = "https://data.rcsb.org/graphql"
+_NIM_HOST = "https://health.api.nvidia.com"
+_NIM_OF3_URL = f"{_NIM_HOST}/v1/biology/openfold/openfold3/predict"
+_NIM_MSA_URL = f"{_NIM_HOST}/v1/biology/colabfold/msa-search/predict"
+_NIM_STATUS_URL = f"{_NIM_HOST}/v1/status"
+_NIM_POLL_SECONDS = 300  # how long the server may hold a request before answering 202
+_NIM_RETRY_STATUS = {429, 502, 503, 504}
 
-_METHOD_LABELS = {
-    "X-ray": "X-RAY DIFFRACTION",
-    "NMR": "SOLUTION NMR",
-    "Cryo-EM": "ELECTRON MICROSCOPY",
-}
+# ColabFold's standard MSA: UniRef30 + the ColabFold environmental database
+# (Mirdita et al. 2022, Nat Methods 19:679).  OpenFold3 NIM accepts <= 3 MSAs.
+MSA_DATABASES = ("Uniref30_2302", "colabfold_envdb_202108")
+_STANDARD_AA = set("ACDEFGHIKLMNPQRSTVWY")
 
-_NIM_OF3_URL = "https://health.api.nvidia.com/v1/biology/openfold/openfold3/predict"
-
-
-def search_rcsb_by_uniprot(
-    uniprot_id: str,
-    methods: tuple[str, ...] = ("X-ray", "NMR", "Cryo-EM"),
-    max_per_method: int = 3,
-    resolution_cutoff: Optional[float] = 3.5,
-    timeout: int = 30,
-) -> dict[str, list[dict]]:
-    """
-    Uses the RCSB search API to find all PDB entries
-    that reference the given UniProt ID, then the RCSB GraphQL Data API to
-    retrieve method, resolution, and chain information for each hit.
-
-    Parameters
-    ----
-    uniprot_id        : UniProt accession, e.g. "P0DP23".
-    methods           : which experimental methods to return.  Must be keys of
-                        _METHOD_LABELS ("X-ray", "NMR", "Cryo-EM").
-    max_per_method    : maximum number of entries to return per method.
-                        Results are sorted by resolution (best first) for X-ray
-                        and Cryo-EM; NMR entries are sorted by deposition date.
-    resolution_cutoff : reject X-ray and Cryo-EM structures worse than this (Å).
-                        Set to None to disable.  NMR structures are not filtered.
-    timeout           : HTTP request timeout in seconds.
-
-    Returns
-    -------
-    Dict mapping method label to a list of dicts, each with:
-      "pdb_id"      : four-character PDB ID (uppercase)
-      "method"      : normalised method label ("X-ray", "NMR", "Cryo-EM")
-      "resolution"  : float or None
-      "chain_id"    : chain that carries the UniProt sequence (first match)
-      "uniprot_id"  : the queried accession (echoed for traceability)
-
-    Raises
-    ------
-    requests.HTTPError if the RCSB API returns a non-200 status.
-    ValueError if an unknown method label is requested.
-    """
-    for m in methods:
-        if m not in _METHOD_LABELS:
-            raise ValueError(
-                f"Unknown method {m!r}. Must be one of: {list(_METHOD_LABELS)}"
-            )
-
-    search_query = {
-        "query": {
-            "type": "terminal",
-            "service": "text",
-            "parameters": {
-                "attribute": (
-                    "rcsb_polymer_entity_container_identifiers"
-                    ".reference_sequence_identifiers.database_accession"
-                ),
-                "operator": "exact_match",
-                "value": uniprot_id,
-                "negation": False,
-            },
-        },
-        "return_type": "entry",
-        "request_options": {
-            "results_verbosity": "compact",
-            "return_all_hits": True,
-        },
-    }
-
-    resp = requests.post(_RCSB_SEARCH_URL, json=search_query, timeout=timeout)
-    resp.raise_for_status()
-
-    if not resp.text.strip():
-        print(f"  [warn] No RCSB entries found for UniProt ID {uniprot_id}")
-        return {m: [] for m in methods}
-
-    result_json = resp.json()
-    raw = result_json.get("result_set", [])
-    pdb_ids = [r["identifier"] if isinstance(r, dict) else r for r in raw]
-
-    if not pdb_ids:
-        print(f"  [warn] No RCSB entries found for UniProt ID {uniprot_id}")
-        return {m: [] for m in methods}
-
-    print(
-        f"  [info] {uniprot_id}: {len(pdb_ids)} total RCSB hits — fetching metadata ..."
-    )
-
-    all_entries: list[dict] = []
-    chunk_size = 100
-
-    for i in range(0, len(pdb_ids), chunk_size):
-        chunk = pdb_ids[i : i + chunk_size]
-        ids_gql = str(chunk).replace("'", '"')
-        graphql_query = f"""
-        {{
-          entries(entry_ids: {ids_gql}) {{
-            rcsb_id
-            exptl {{
-              method
-            }}
-            refine {{
-              ls_d_res_high
-            }}
-            rcsb_entry_info {{
-              resolution_combined
-            }}
-            em_3d_reconstruction {{
-              resolution
-            }}
-            polymer_entities {{
-              rcsb_polymer_entity_container_identifiers {{
-                auth_asym_ids
-                reference_sequence_identifiers {{
-                  database_accession
-                  database_name
-                }}
-              }}
-            }}
-          }}
-        }}
-        """
-
-        gql_resp = requests.post(
-            _RCSB_GRAPHQL_URL,
-            json={"query": graphql_query},
-            timeout=timeout,
-        )
-        gql_resp.raise_for_status()
-        data = gql_resp.json().get("data", {}).get("entries", [])
-        all_entries.extend(data)
-        time.sleep(0.1)
-
-    grouped: dict[str, list[dict]] = {m: [] for m in methods}
-
-    for entry in all_entries:
-        pdb_id = entry.get("rcsb_id", "").upper()
-
-        raw_methods = [e.get("method", "") for e in (entry.get("exptl") or [])]
-        raw_method = raw_methods[0].upper().strip() if raw_methods else ""
-
-        matched_label: Optional[str] = None
-        for label, canonical in _METHOD_LABELS.items():
-            if canonical in raw_method or raw_method in canonical:
-                matched_label = label
-                break
-
-        if matched_label is None or matched_label not in methods:
-            continue
-
-        resolution: Optional[float] = None
-        refine = entry.get("refine") or []
-        if refine and refine[0].get("ls_d_res_high") is not None:
-            try:
-                resolution = float(refine[0]["ls_d_res_high"])
-            except (TypeError, ValueError):
-                pass
-        if resolution is None:
-            combined = (entry.get("rcsb_entry_info") or {}).get("resolution_combined")
-            if combined is not None:
-                try:
-                    resolution = float(combined)
-                except (TypeError, ValueError):
-                    pass
-        if resolution is None:
-            em_recon = entry.get("em_3d_reconstruction") or []
-            if em_recon and em_recon[0].get("resolution") is not None:
-                try:
-                    resolution = float(em_recon[0]["resolution"])
-                except (TypeError, ValueError):
-                    pass
-
-        if matched_label != "NMR" and resolution_cutoff is not None:
-            if resolution is None or resolution > resolution_cutoff:
-                continue
-        # for simple single-chain proteins, the chain is almost always labelled A by convention
-        chain_id = "A"
-        for entity in entry.get("polymer_entities") or []:
-            ids_block = entity.get("rcsb_polymer_entity_container_identifiers", {})
-            refs = ids_block.get("reference_sequence_identifiers") or []
-            for ref in refs:
-                if (
-                    ref.get("database_name", "").upper() == "UNIPROT"
-                    and ref.get("database_accession", "").upper() == uniprot_id.upper()
-                ):
-                    chains = ids_block.get("auth_asym_ids") or []
-                    if chains:
-                        chain_id = chains[0]
-                    break
-
-        grouped[matched_label].append(
-            {
-                "pdb_id": pdb_id,
-                "method": matched_label,
-                "resolution": resolution,
-                "chain_id": chain_id,
-                "uniprot_id": uniprot_id,
-            }
-        )
-
-    for label in methods:
-        bucket = grouped[label]
-        if label in ("X-ray", "Cryo-EM"):
-            bucket.sort(key=lambda x: (x["resolution"] is None, x["resolution"] or 999))
-        grouped[label] = bucket[:max_per_method]
-
-    for label, hits in grouped.items():
-        print(f"  [info] {uniprot_id} {label}: {len(hits)} candidate(s) selected")
-
-    return grouped
+# AlphaFold DB API fields kept as provenance of an AF2 model (those present in the answer)
+_AFDB_PROVENANCE_KEYS = (
+    "entryId",
+    "latestVersion",
+    "allVersions",
+    "modelCreatedDate",
+    "sequenceVersionDate",
+    "uniprotStart",
+    "uniprotEnd",
+    "globalMetricValue",
+    "cifUrl",
+)
 
 
 def download_rcsb(pdb_id: str, save_dir: str, timeout: int = 30) -> str:
@@ -262,7 +63,7 @@ def download_rcsb(pdb_id: str, save_dir: str, timeout: int = 30) -> str:
     Download a mmCIF file from RCSB PDB by PDB ID.
 
     Parameters
-    ----
+    ----------
     pdb_id   : four-character PDB accession, e.g. "1UBQ".
     save_dir : directory to save the file into.
     timeout  : HTTP request timeout in seconds.
@@ -293,10 +94,11 @@ def download_rcsb(pdb_id: str, save_dir: str, timeout: int = 30) -> str:
 def download_alphafold2(uniprot_id: str, save_dir: str, timeout: int = 30) -> str:
     """
     Download an AlphaFold2 predicted structure in mmCIF format from the AlphaFold DB.
-    The API always returns the latest available prediction.
+    The API always returns the latest available prediction, so the model version
+    and the download date are saved in AF2_<uniprot_id>_provenance.json.
 
     Parameters
-    ----
+    ----------
     uniprot_id : UniProt accession, e.g. "P0DP23".
     save_dir   : directory to save into (created if absent).
     timeout    : HTTP request timeout in seconds.
@@ -331,6 +133,16 @@ def download_alphafold2(uniprot_id: str, save_dir: str, timeout: int = 30) -> st
     cif_response = requests.get(cif_url, timeout=timeout)
     cif_response.raise_for_status()
 
+    record = records[0]
+    provenance = {
+        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "api_url": api_url,
+        "uniprot_id": uniprot_id,
+        "cif_sha256": hashlib.sha256(cif_response.text.encode()).hexdigest(),
+        **{k: record.get(k) for k in _AFDB_PROVENANCE_KEYS if k in record},
+    }
+    with open(out_path.replace(".cif", "_provenance.json"), "w", encoding="utf-8") as f:
+        json.dump(provenance, f, indent=2, default=str)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(cif_response.text)
 
@@ -340,12 +152,11 @@ def download_alphafold2(uniprot_id: str, save_dir: str, timeout: int = 30) -> st
 
 def fetch_uniprot_sequence(uniprot_id: str, timeout: int = 15) -> str:
     """
-    Fetch the canonical amino acid sequence for a UniProt accession. The
-    returnedvsequence is the reviewed canonical isoform for Swiss-Prot
-    entries.
+    Fetch the canonical amino acid sequence for a UniProt accession (for
+    Swiss-Prot entries, the reviewed canonical isoform).
 
     Parameters
-    ----
+    ----------
     uniprot_id : UniProt accession, e.g. "P0DP23".
     timeout    : HTTP request timeout in seconds.
 
@@ -375,66 +186,8 @@ def fetch_uniprot_sequence(uniprot_id: str, timeout: int = 15) -> str:
     return sequence
 
 
-def predict_openfold3(
-    uniprot_id: str,
-    sequence: str,
-    save_dir: str,
-    nim_api_key: Optional[str] = None,
-    diffusion_samples: int = 1,
-    timeout: int = 300,
-) -> str:
-    """
-    Submit an amino acid sequence to the NVIDIA NIM OpenFold3 endpoint and
-    save the returned mmCIF prediction.
-
-    OpenFold3 reference
-    -------------------
-    Model:   https://github.com/aqlaboratory/openfold-3
-    NIM API: https://build.nvidia.com/openfold/openfold3
-    Docs:    https://docs.nvidia.com/nim/bionemo/openfold3/latest/example-requests.html
-
-    Authentication
-    --------------
-    Requires a NIM API key.  Pass it via the `nim_api_key` argument or set
-    the environment variable NIM_API_KEY. Set the environment variable NIM_API_KEY before calling predict_openfold3().
-    The recommended way is a .env file at the repo root:
-
-        NIM_API_KEY=nvapi-xxxxxxxxxxxxxxxxxxxx
-
-    loaded at the top of the acquisition notebook with:
-
-    from dotenv import load_dotenv; load_dotenv()
-
-    --------------------------------------
-
-    Parameters
-    ----
-    uniprot_id        : UniProt accession used to name the output file.
-    sequence          : Single-letter amino acid sequence (from fetch_uniprot_sequence).
-    save_dir          : Directory to save the CIF into (created if absent).
-    nim_api_key       : NIM API key.  Falls back to os.environ["NIM_API_KEY"] if None.
-    diffusion_samples : Independent structure samples to generate (1-5, default 1).
-                        1 is fastest; the first sample is saved as the output file.
-    timeout           : HTTP request timeout in seconds.  OF3 predictions for
-                        proteins up to ~500 residues typically complete in 60-120 s.
-
-    Returns
-    -------
-    Full path to the saved OF3_<uniprot_id>.cif file.
-
-    Raises
-    ------
-    EnvironmentError  if no API key is available.
-    requests.HTTPError if the NIM endpoint returns a non-200 status.
-    ValueError if the response does not contain a valid mmCIF structure.
-    """
-    os.makedirs(save_dir, exist_ok=True)
-    out_path = os.path.join(save_dir, f"OF3_{uniprot_id}.cif")
-
-    if os.path.exists(out_path):
-        print(f"  [skip] OF3_{uniprot_id}.cif already exists")
-        return out_path
-
+def _nim_key(nim_api_key: Optional[str]) -> str:
+    """The NIM API key: the argument, else the NIM_API_KEY environment variable."""
     key = nim_api_key or os.environ.get("NIM_API_KEY")
     if not key:
         raise EnvironmentError(
@@ -442,14 +195,341 @@ def predict_openfold3(
             "or pass it as the nim_api_key argument.\n"
             "Get a key at: https://build.nvidia.com/openfold/openfold3"
         )
+    return key
 
+
+def _retry_wait(resp: requests.Response, attempt: int) -> float:
+    """Seconds to wait before retrying: the Retry-After header, else 10, 20, 40, ... s."""
+    try:
+        return float(resp.headers.get("Retry-After", ""))
+    except ValueError:
+        return 10.0 * 2**attempt
+
+
+def _post_nim(
+    url: str, payload: dict, key: str, max_wait: int = 1800, max_retries: int = 5
+) -> requests.Response:
+    """
+    POST a request to a hosted NVIDIA NIM endpoint and return the final response.
+
+    429, 5xx  (rate limit, 502/503/504), a time-out or a dropped connection on
+              submission: wait and submit again (the Retry-After header if
+              given, else 10, 20, 40, ... s).
+    202       the job is running: poll /v1/status/<nvcf-reqid> until it ends.
+              The job is never submitted twice; temporary errors while polling
+              are waited out and the same job is polled again.
+    other     raise requests.HTTPError with the server's message.
+    max_wait  bounds the whole call (submission + polling), in seconds.
+    """
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "NVCF-POLL-SECONDS": str(_NIM_POLL_SECONDS),
     }
+    http_timeout = _NIM_POLL_SECONDS + 30
+    deadline = time.monotonic() + max_wait
 
-    minimal_msa_a3m = f">query\n{sequence}"
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.post(
+                url, json=payload, headers=headers, timeout=http_timeout
+            )
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            if attempt == max_retries:
+                raise
+            wait = 10.0 * 2**attempt
+            print(
+                f"  [wait] {type(exc).__name__} from NIM; "
+                f"retry {attempt + 1}/{max_retries} in {wait:.0f} s"
+            )
+            time.sleep(wait)
+            continue
+        if resp.status_code not in _NIM_RETRY_STATUS or attempt == max_retries:
+            break
+        wait = _retry_wait(resp, attempt)
+        print(
+            f"  [wait] HTTP {resp.status_code} from NIM; "
+            f"retry {attempt + 1}/{max_retries} in {wait:.0f} s"
+        )
+        time.sleep(wait)
+
+    if resp.status_code == 202:
+        request_id = resp.headers.get("nvcf-reqid")
+        if not request_id:
+            raise requests.HTTPError(
+                f"NIM answered 202 (job running) without a request id: {resp.text[:300]}",
+                response=resp,
+            )
+        poll_failures = 0
+        while resp.status_code == 202 or (
+            resp.status_code in _NIM_RETRY_STATUS and poll_failures < max_retries
+        ):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError(
+                    f"NIM job {request_id} still running after {max_wait} s"
+                )
+            if resp.status_code == 202:
+                time.sleep(5)
+            else:
+                time.sleep(_retry_wait(resp, poll_failures))
+                poll_failures += 1
+            poll_headers = {
+                **headers,
+                "NVCF-POLL-SECONDS": str(int(min(_NIM_POLL_SECONDS, max(left, 1)))),
+            }
+            try:
+                resp = requests.get(
+                    f"{_NIM_STATUS_URL}/{request_id}",
+                    headers=poll_headers,
+                    timeout=http_timeout,
+                )
+            except (requests.Timeout, requests.ConnectionError):
+                poll_failures += 1  # keep the last answer and poll the same job again
+                if poll_failures > max_retries:
+                    raise
+
+    if resp.status_code != 200:
+        hints = {
+            401: "Check NIM_API_KEY.",
+            422: "The request was rejected as invalid.",
+            429: "Rate limit: still exceeded after all retries.",
+        }
+        raise requests.HTTPError(
+            f"NIM request to {url} failed with HTTP {resp.status_code}. "
+            f"{hints.get(resp.status_code, '')}\nResponse: {resp.text[:500]}",
+            response=resp,
+        )
+    return resp
+
+
+def _provenance_headers(resp: requests.Response) -> dict:
+    """The response headers worth keeping for provenance (date, request and version ids)."""
+    keep = {
+        "date",
+        "server",
+        "nvcf-reqid",
+        "x-request-id",
+        "x-nim-version",
+        "x-model-version",
+    }
+    return {k: v for k, v in resp.headers.items() if k.lower() in keep}
+
+
+def msa_depth(a3m: str) -> int:
+    """Number of sequences in an a3m alignment (the query included)."""
+    return sum(1 for line in a3m.splitlines() if line.startswith(">"))
+
+
+def _first_a3m_sequence(a3m: str) -> str:
+    """The first (query) sequence of an a3m alignment, without line breaks."""
+    lines = []
+    for line in a3m.splitlines():
+        if line.startswith("#"):
+            continue
+        if line.startswith(">"):
+            if lines:
+                break
+            continue
+        lines.append(line.strip())
+    return "".join(lines)
+
+
+def fetch_msa(
+    uniprot_id: str,
+    sequence: str,
+    save_dir: str = "data/msas",
+    nim_api_key: Optional[str] = None,
+    databases: tuple[str, ...] = MSA_DATABASES,
+    e_value: float = 1e-4,
+    max_msa_sequences: int = 500,
+) -> dict[str, str]:
+    """
+    Build the MSA of one sequence with the NVIDIA MSA Search NIM.
+
+    The NIM runs ColabFold's MMseqs2 search (search_type "colabfold") against
+    the given databases.  Besides one alignment per database it also returns
+    "colabfold", their merge; only the requested databases are returned here,
+    so OpenFold3 never gets the same sequences twice.  Every returned a3m is
+    saved as <save_dir>/<uniprot_id>/<name>.a3m together with msa_search.json
+    (parameters, date, sequence hash, number of sequences per alignment).  If
+    those files exist for the same sequence and the same search settings they
+    are read back instead of searching again, so re-runs send no request.
+
+    Parameters
+    ----------
+    uniprot_id        : UniProt accession (folder name).
+    sequence          : the query sequence (the same one given to OpenFold3).
+    save_dir          : root folder for the MSAs (data/ is not in git).
+    nim_api_key       : NIM API key; falls back to os.environ["NIM_API_KEY"].
+    databases         : sequence databases to search.
+    e_value           : E-value threshold for hits (NIM default 1e-4).
+    max_msa_sequences : maximum sequences kept per alignment (NIM default 500).
+
+    Returns
+    -------
+    {database: a3m text} for the requested databases, ready for
+    predict_openfold3(msa=...).
+    """
+    wanted = {db.lower() for db in databases}
+    out_dir = os.path.join(save_dir, uniprot_id)
+    info_path = os.path.join(out_dir, "msa_search.json")
+    seq_hash = hashlib.sha256(sequence.encode()).hexdigest()
+    params = {
+        "sequence": sequence,
+        "databases": list(databases),
+        "search_type": "colabfold",
+        "e_value": e_value,
+        "max_msa_sequences": max_msa_sequences,
+        "output_alignment_formats": ["a3m"],
+    }
+    settings = {k: v for k, v in params.items() if k != "sequence"}
+
+    if os.path.exists(info_path):
+        with open(info_path, encoding="utf-8") as f:
+            info = json.load(f)
+        files = {db: os.path.join(out_dir, f"{db}.a3m") for db in info["databases"]}
+        if (
+            info.get("sequence_sha256") == seq_hash
+            and info.get("parameters") == settings
+            and all(os.path.exists(path) for path in files.values())
+        ):
+            msa = {}
+            for db, path in files.items():
+                if db.lower() in wanted:
+                    with open(path, encoding="utf-8") as f:
+                        msa[db] = f.read()
+            if msa:
+                print(f"  [skip] MSA for {uniprot_id} already exists")
+                return msa
+
+    unusual = sorted(set(sequence) - _STANDARD_AA)
+    if unusual:
+        raise ValueError(
+            f"{uniprot_id}: sequence contains {unusual}; the MSA Search NIM accepts "
+            "only the 20 standard amino acids.  Handle this protein by hand."
+        )
+
+    print(f"  [info] MSA search for {uniprot_id} ({len(sequence)} aa) ...")
+    resp = _post_nim(_NIM_MSA_URL, params, _nim_key(nim_api_key))
+    result = resp.json()
+
+    returned = {}
+    for db, formats in (result.get("alignments") or {}).items():
+        text = ((formats or {}).get("a3m") or {}).get("alignment") or ""
+        if text.strip():
+            returned[db] = text
+    msa = {db: text for db, text in returned.items() if db.lower() in wanted}
+    if not msa:
+        raise ValueError(
+            f"MSA Search returned none of {list(databases)} for {uniprot_id}; "
+            f"alignments returned: {list(returned)}"
+        )
+
+    os.makedirs(out_dir, exist_ok=True)
+    for db, text in returned.items():
+        with open(os.path.join(out_dir, f"{db}.a3m"), "w", encoding="utf-8") as f:
+            f.write(text)
+    info = {
+        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "endpoint": _NIM_MSA_URL,
+        "uniprot_id": uniprot_id,
+        "sequence_length": len(sequence),
+        "sequence_sha256": seq_hash,
+        "parameters": settings,
+        "databases": list(returned),
+        "n_sequences": {db: msa_depth(text) for db, text in returned.items()},
+        "nim_response_headers": _provenance_headers(resp),
+    }
+    with open(info_path, "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=2)
+    used = {db: info["n_sequences"][db] for db in msa}
+    print(f"  [ok]   MSA saved -> {out_dir}  used: {used}")
+    return msa
+
+
+def _check_existing_of3(out_path: str) -> None:
+    """Refuse to reuse an OF3 file that was not predicted with this pipeline's MSA."""
+    prov_path = out_path.replace(".cif", "_provenance.json")
+    if not os.path.exists(prov_path):
+        raise RuntimeError(
+            f"{out_path} exists without {os.path.basename(prov_path)}, so it is not "
+            "known how it was predicted.  Move it out of the folder and run again."
+        )
+    with open(prov_path, encoding="utf-8") as f:
+        msa_type = json.load(f).get("msa_type", "")
+    if "colabfold" not in msa_type:
+        raise RuntimeError(
+            f"{out_path} was predicted without an MSA.  Delete it (and its "
+            "_provenance.json) and run again."
+        )
+
+
+def predict_openfold3(
+    uniprot_id: str,
+    sequence: str,
+    save_dir: str,
+    nim_api_key: Optional[str] = None,
+    *,
+    msa: dict[str, str],
+    diffusion_samples: int = 5,
+    max_wait: int = 1800,
+) -> str:
+    """
+    Predict the structure of one sequence with OpenFold3 (NVIDIA NIM), using its MSA.
+
+    OpenFold3 reference
+    -------------------
+    Model:   https://github.com/aqlaboratory/openfold-3
+    NIM API: https://build.nvidia.com/openfold/openfold3
+    Docs:    https://docs.nvidia.com/nim/bionemo/openfold3/latest/example-requests.html
+
+    Authentication: NIM_API_KEY in the environment (.env file at the repo root,
+    loaded with `from dotenv import load_dotenv; load_dotenv()`), or nim_api_key.
+
+    The model returns `diffusion_samples` structures, each with a
+    confidence_score.  The top-ranked one (highest confidence_score) is saved
+    as OF3_<uniprot_id>.cif; all samples go to <save_dir>/samples/ and all
+    scores to OF3_<uniprot_id>_provenance.json.
+
+    Parameters
+    ----------
+    uniprot_id        : UniProt accession used to name the output file.
+    sequence          : the UniProt canonical sequence (fetch_uniprot_sequence).
+    save_dir          : directory to save the CIF into (created if absent).
+    nim_api_key       : NIM API key; falls back to os.environ["NIM_API_KEY"].
+    msa               : {database: a3m text} from fetch_msa (required, keyword only).
+                        The first sequence of each a3m must equal `sequence`.
+    diffusion_samples : structures generated per request (1-5, default 5).
+    max_wait          : seconds to wait for a running job before giving up.
+
+    Returns
+    -------
+    Full path to the saved OF3_<uniprot_id>.cif file.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    out_path = os.path.join(save_dir, f"OF3_{uniprot_id}.cif")
+    prov_path = out_path.replace(".cif", "_provenance.json")
+
+    if os.path.exists(out_path):
+        _check_existing_of3(out_path)
+        print(f"  [skip] OF3_{uniprot_id}.cif already exists")
+        return out_path
+
+    if not msa:
+        raise ValueError(
+            f"{uniprot_id}: no MSA given.  OpenFold3 without an MSA is not a valid "
+            "prediction for this study; build one with fetch_msa()."
+        )
+    if len(msa) > 3:
+        raise ValueError("OpenFold3 NIM accepts at most 3 MSA databases per protein")
+    for db, a3m in msa.items():
+        if _first_a3m_sequence(a3m) != sequence:
+            raise ValueError(
+                f"{uniprot_id}: the first sequence of the {db} MSA is not the query "
+                "sequence (the NIM requires them to be identical)."
+            )
 
     payload = {
         "inputs": [
@@ -460,12 +540,8 @@ def predict_openfold3(
                         "type": "protein",
                         "sequence": sequence,
                         "msa": {
-                            "main": {
-                                "a3m": {
-                                    "alignment": minimal_msa_a3m,
-                                    "format": "a3m",
-                                }
-                            }
+                            db: {"a3m": {"alignment": a3m, "format": "a3m"}}
+                            for db, a3m in msa.items()
                         },
                     }
                 ],
@@ -476,196 +552,73 @@ def predict_openfold3(
     }
 
     print(
-        f"  [info] Submitting OF3 prediction for {uniprot_id} "
-        f"({len(sequence)} aa) to NVIDIA NIM ..."
+        f"  [info] OpenFold3 for {uniprot_id} ({len(sequence)} aa, "
+        f"MSA {', '.join(f'{db}: {msa_depth(a)}' for db, a in msa.items())}) ..."
     )
-
-    resp = requests.post(_NIM_OF3_URL, json=payload, headers=headers, timeout=timeout)
-
-    if resp.status_code == 401:
-        raise requests.HTTPError(
-            f"NIM authentication failed (401). Check your NIM_API_KEY.\n"
-            f"Response: {resp.text[:300]}"
-        )
-    if resp.status_code == 422:
-        raise requests.HTTPError(
-            f"NIM validation error (422). The request schema is malformed.\n"
-            f"Response: {resp.text[:500]}"
-        )
-    if resp.status_code == 429:
-        raise requests.HTTPError(
-            f"NIM rate limit exceeded (429). Wait and retry, or check your quota.\n"
-            f"Response: {resp.text[:300]}"
-        )
-    resp.raise_for_status()
-
+    resp = _post_nim(_NIM_OF3_URL, payload, _nim_key(nim_api_key), max_wait=max_wait)
     result = resp.json()
 
     outputs = result.get("outputs") or []
-    if not outputs:
+    samples = (outputs[0].get("structures_with_scores") or []) if outputs else []
+    if not samples:
         raise ValueError(
-            f"NIM OF3 response for {uniprot_id} has no 'outputs' field.\n"
-            f"Top-level keys: {list(result.keys())}\n"
-            f"Raw (first 500 chars): {resp.text[:500]}"
+            f"NIM OF3 response for {uniprot_id} has no structures; "
+            f"top-level keys: {list(result.keys())}"
         )
+    for k, sample in enumerate(samples):
+        try:
+            if not gemmi.cif.read_string(sample.get("structure") or ""):
+                raise ValueError("no data block")
+        except Exception as exc:
+            raise ValueError(
+                f"NIM OF3 sample {k} for {uniprot_id} is not valid mmCIF: {exc}"
+            ) from exc
 
-    structures_with_scores = outputs[0].get("structures_with_scores") or []
-    if not structures_with_scores:
-        raise ValueError(
-            f"NIM OF3 response for {uniprot_id}: 'structures_with_scores' is empty.\n"
-            f"Output-level keys: {list(outputs[0].keys())}"
-        )
+    # The model's own ranking: keep the sample with the highest confidence_score.
+    scores = [s.get("confidence_score") for s in samples]
+    best = max(
+        range(len(samples)),
+        key=lambda k: scores[k] if scores[k] is not None else float("-inf"),
+    )
 
-    cif_content: Optional[str] = structures_with_scores[0].get("structure")
-    if not cif_content or not isinstance(cif_content, str):
-        raise ValueError(
-            f"NIM OF3 'structure' field missing or empty for {uniprot_id}.\n"
-            f"structures_with_scores[0] keys: {list(structures_with_scores[0].keys())}"
-        )
+    # Samples and provenance first; the top model last, in one step, so that
+    # OF3_<id>.cif on disk always means a finished run with its provenance.
+    samples_dir = os.path.join(save_dir, "samples")
+    os.makedirs(samples_dir, exist_ok=True)
+    for k, sample in enumerate(samples):
+        path = os.path.join(samples_dir, f"OF3_{uniprot_id}_sample{k}.cif")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(sample["structure"])
 
-    try:
-        gemmi.cif.read_string(cif_content)
-    except Exception as exc:
-        raise ValueError(
-            f"NIM OF3 response for {uniprot_id} is not valid mmCIF: {exc}"
-        ) from exc
-
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(cif_content)
-
-    print(f"  [ok]   OF3 prediction saved -> {out_path}")
-
-    prov_path = out_path.replace(".cif", "_provenance.json")
-    confidence_fields = {
-        k: v for k, v in structures_with_scores[0].items() if k != "structure"
-    }
     provenance = {
-        "generated_utc": datetime.datetime.utcnow().isoformat() + "Z",
+        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "nim_endpoint_url": _NIM_OF3_URL,
         "uniprot_id": uniprot_id,
         "sequence_length": len(sequence),
         "sequence_sha256": hashlib.sha256(sequence.encode()).hexdigest(),
+        "msa_type": "colabfold_mmseqs2 (NVIDIA MSA Search NIM)",
+        "msa_databases": list(msa),
+        "msa_n_sequences": {db: msa_depth(a3m) for db, a3m in msa.items()},
         "diffusion_samples": diffusion_samples,
-        "msa_type": "single_sequence_query_only",
-        "msa_note": (
-            "Only the query sequence was submitted as the MSA (no homologs). "
-            "This is equivalent to MSA-free prediction. AF2 predictions from "
-            "the AlphaFold DB use deep evolutionary MSAs; this difference "
-            "must be stated as a limitation when comparing AF2 and OF3 results."
-        ),
-        "nim_response_headers": {
-            k: v
-            for k, v in resp.headers.items()
-            if k.lower()
-            in (
-                "x-request-id",
-                "x-nim-version",
-                "x-model-version",
-                "content-type",
-                "date",
-                "server",
-            )
-        },
-        "confidence_scores": confidence_fields,
+        "selected_sample": best,
+        "selection_rule": "highest confidence_score among the returned samples",
+        "sample_scores": [
+            {k: v for k, v in s.items() if k != "structure"} for s in samples
+        ],
+        "nim_response_headers": _provenance_headers(resp),
         "output_cif_path": out_path,
     }
-    with open(prov_path, "w", encoding="utf-8") as pf:
-        json.dump(provenance, pf, indent=2, default=str)
-    print(f"  [ok]   OF3 provenance saved -> {prov_path}")
+    with open(prov_path, "w", encoding="utf-8") as f:
+        json.dump(provenance, f, indent=2, default=str)
+    with open(out_path + ".part", "w", encoding="utf-8") as f:
+        f.write(samples[best]["structure"])
+    os.replace(out_path + ".part", out_path)
 
-    return out_path
-
-
-def verify_chain_uniprot_mapping(
-    pdb_id: str,
-    chain_id: str,
-    expected_uniprot_id: str,
-    timeout: int = 15,
-) -> dict:
-    """
-    Confirm via the RCSB GraphQL API that a specific PDB chain is officially mapped to
-    the expected UniProt accession, catching chain mismatches before the pipeline runs.
-
-
-    Parameters
-    ----
-    pdb_id             : four-character PDB ID (case-insensitive).
-    chain_id           : chain letter from proteins.csv (e.g. "A", "B").
-    expected_uniprot_id: UniProt accession to verify against.
-    timeout            : HTTP timeout in seconds.
-
-    Returns
-    -------
-    dict with:
-      "verified"        : bool — True if RCSB maps this chain to the expected UniProt.
-      "mapped_uniprots" : list[str] — all UniProt IDs RCSB associates with this chain.
-      "all_chains_for_uniprot" : list[str] — chains in this entry that carry the UniProt.
-      "error"           : str or None — set if the API call failed.
-    """
-    pdb_id = pdb_id.upper().strip()
-    expected = expected_uniprot_id.upper().strip()
-
-    query = f"""
-    {{
-      polymer_entity_instances(instance_ids: ["{pdb_id}.{chain_id}"]) {{
-        polymer_entity {{
-          rcsb_polymer_entity_container_identifiers {{
-            auth_asym_ids
-            reference_sequence_identifiers {{
-              database_accession
-              database_name
-            }}
-          }}
-        }}
-      }}
-    }}
-    """
-
-    try:
-        resp = requests.post(
-            _RCSB_GRAPHQL_URL,
-            json={"query": query},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as exc:
-        return {
-            "verified": False,
-            "mapped_uniprots": [],
-            "all_chains_for_uniprot": [],
-            "error": str(exc),
-        }
-
-    instances = (data.get("data") or {}).get("polymer_entity_instances") or []
-    if not instances:
-        return {
-            "verified": False,
-            "mapped_uniprots": [],
-            "all_chains_for_uniprot": [],
-            "error": f"No polymer_entity_instances found for {pdb_id}.{chain_id}",
-        }
-
-    entity_ids = (
-        instances[0]
-        .get("polymer_entity", {})
-        .get("rcsb_polymer_entity_container_identifiers", {})
+    print(
+        f"  [ok]   OF3 saved -> {out_path}  "
+        f"(sample {best}, confidence {scores[best]})"
     )
-    refs = entity_ids.get("reference_sequence_identifiers") or []
-    mapped = [
-        r["database_accession"].upper()
-        for r in refs
-        if r.get("database_name", "").upper() == "UNIPROT"
-        and r.get("database_accession")
-    ]
-    all_chains = entity_ids.get("auth_asym_ids") or []
-
-    return {
-        "verified": expected in mapped,
-        "mapped_uniprots": mapped,
-        "all_chains_for_uniprot": all_chains,
-        "error": None,
-    }
+    return out_path
 
 
 def download_missing_inputs(
@@ -675,11 +628,12 @@ def download_missing_inputs(
     skip_of3: bool = False,
 ) -> dict:
     """
-    Attempt to download all structure files listed in missing_inputs.csv. (Due to network or api related errors)
-    After running this, re-run the pipeline to include the newly downloaded files.
+    Download the structure files listed in missing_inputs.csv (written by the
+    pipeline when a file is absent, e.g. after a failed request), then re-run
+    the pipeline to include them.
 
     Parameters
-    ----
+    ----------
     missing_inputs_csv : path to missing_inputs.csv (default: results/missing_inputs.csv).
     data_dir           : root data directory (must contain experimental/, alphafold2/,
                          openfold3/ subdirectories or they will be created).
@@ -735,12 +689,20 @@ def download_missing_inputs(
                     skipped.append({**row, "skip_reason": "skip_of3=True"})
                     continue
                 attempted += 1
-                seq = fetch_uniprot_sequence(uniprot_id or pdb_or_uniprot)
+                accession = uniprot_id or pdb_or_uniprot
+                seq = fetch_uniprot_sequence(accession)
+                msa = fetch_msa(
+                    accession,
+                    seq,
+                    save_dir=os.path.join(data_dir, "msas"),
+                    nim_api_key=nim_api_key,
+                )
                 predict_openfold3(
-                    uniprot_id=uniprot_id or pdb_or_uniprot,
+                    uniprot_id=accession,
                     sequence=seq,
                     save_dir=os.path.join(data_dir, "openfold3"),
                     nim_api_key=nim_api_key,
+                    msa=msa,
                 )
                 succeeded += 1
 
@@ -763,31 +725,3 @@ def download_missing_inputs(
         "failed": failed,
         "skipped": skipped,
     }
-
-
-def load_proteins(file_path: str) -> list[tuple[str, str]]:
-    """
-    Load a protein list from a plain-text file.
-
-    Each non-empty, non-comment line must have the format:
-        protein_name,UniProtID
-
-    Lines starting with '#' and blank lines are ignored.
-
-    Parameters
-    ----------
-    file_path : path to the protein list file.
-
-    Returns
-    -------
-    List of (protein_name, uniprot_id) tuples.
-    """
-    proteins = []
-    with open(file_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            name, uniprot = line.split(",", 1)
-            proteins.append((name.strip(), uniprot.strip()))
-    return proteins

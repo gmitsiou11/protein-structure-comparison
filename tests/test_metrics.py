@@ -10,14 +10,16 @@ No structure files are needed — all tests use synthetic coordinate arrays.
 import numpy as np
 import pytest
 
+from types import SimpleNamespace
+
 from src.metrics import (
     _kabsch_rmsd,
-    _dist_matrix,
     _t_alpha,
     _w_rdist,
     _b_phipsi,
-    _angles_to_circular,
     _bhattacharyya_distance,
+    summary_from_arrays,
+    compute_all_metrics,
     MIN_B_PHIPSI_SAMPLES,
 )
 
@@ -34,18 +36,9 @@ def _random_coords(n: int, seed: int = 42) -> np.ndarray:
 
 def _all_atom_coords(n: int, seed: int = 0) -> np.ndarray:
     """
-    Dense all-atom coordinate array suitable for t-alpha testing.
-
-    _t_alpha expects all heavy-atom coordinates (shape (K, 3)), not a distance
-    matrix.  With n >= 50 standard-normal points, after MinMax normalisation to
-    [0,1]^3 the alpha-shape (alpha=0.085) reliably produces a non-zero triangle
-    count, so identity comparisons return 0 and non-identity comparisons return
-    a positive value.
-
-    Do NOT pass _dist_matrix(coords) to _t_alpha — that is an (n, n) matrix
-    interpreted as n points in n-dimensional space, which causes Delaunay to
-    fail (QhullError: not enough points for initial simplex in n-D) and all
-    _t_alpha tests to return {raw: None}.
+    Dense all-atom point cloud (n, 3) for t-alpha testing.  With n >= 50
+    standard-normal points, the alpha shape (alpha = 0.085, after MinMax
+    scaling to [0, 1]^3) reliably has a non-zero number of triangles.
     """
     rng = np.random.default_rng(seed)
     return rng.standard_normal((n, 3))
@@ -59,6 +52,28 @@ def _random_rotation(seed: int = 0) -> np.ndarray:
     if np.linalg.det(Q) < 0:
         Q[:, 0] *= -1
     return Q
+
+
+def _helix_angles(n: int, noise: float = 2.0, seed: int = 0) -> np.ndarray:
+    """Approximate alpha-helix (phi, psi) pairs in degrees, with small noise."""
+    rng = np.random.default_rng(seed)
+    return np.full((n, 2), [-60.0, -45.0]) + rng.standard_normal((n, 2)) * noise
+
+
+def _strand_angles(n: int, noise: float = 3.0, seed: int = 99) -> np.ndarray:
+    """Approximate beta-strand (phi, psi) pairs in degrees."""
+    rng = np.random.default_rng(seed)
+    return np.full((n, 2), [-120.0, 130.0]) + rng.standard_normal((n, 2)) * noise
+
+
+def _summary(n_res: int = 60, seed: int = 0, angles=None, atoms=None):
+    """A synthetic StructureSummary of n_res residues."""
+    ca = _random_coords(n_res, seed) * 10
+    if angles is None:
+        angles = _helix_angles(n_res, seed=seed)
+    if atoms is None:
+        atoms = _all_atom_coords(100, seed=seed)
+    return summary_from_arrays(ca, "A" * n_res, angles, atoms)
 
 
 # ---------------------------------------------------------------------------
@@ -166,268 +181,156 @@ class TestKabschRMSD:
 
 
 # ---------------------------------------------------------------------------
-# Distance matrix
-# ---------------------------------------------------------------------------
-
-class TestDistMatrix:
-    def test_diagonal_is_zero(self):
-        """Pairwise distance from a point to itself must be 0."""
-        coords = _random_coords(20)
-        D = _dist_matrix(coords)
-        np.testing.assert_allclose(np.diag(D), 0.0, atol=1e-12)
-
-    def test_symmetry(self):
-        """Distance matrix must be symmetric."""
-        coords = _random_coords(15)
-        D = _dist_matrix(coords)
-        np.testing.assert_allclose(D, D.T, atol=1e-12)
-
-    def test_non_negative(self):
-        """All distances must be non-negative."""
-        coords = _random_coords(10)
-        D = _dist_matrix(coords)
-        assert np.all(D >= 0.0)
-
-    def test_triangle_inequality(self):
-        """Basic triangle inequality sanity check for a few triplets."""
-        coords = _random_coords(5)
-        D = _dist_matrix(coords)
-        for i in range(5):
-            for j in range(5):
-                for k in range(5):
-                    assert D[i, j] <= D[i, k] + D[k, j] + 1e-10
-
-
-# ---------------------------------------------------------------------------
-# t-alpha
-#
-# IMPORTANT: _t_alpha(all_atom_coords_a, all_atom_coords_b) takes raw (K, 3)
-# coordinate arrays — NOT (N, N) distance matrices.
-#
-# Passing a distance matrix (as produced by _dist_matrix) is wrong: an (N×N)
-# matrix is interpreted as N points in N-dimensional space, which causes
-# Delaunay triangulation to fail (QhullError: not enough points for an N-D
-# simplex) and every test to silently return {"raw": None, "norm": None}.
-#
-# All tests below use _all_atom_coords() which generates a (n, 3) array.
+# t-alpha — compares the two log triangle counts stored in the summaries
 # ---------------------------------------------------------------------------
 
 class TestTAlpha:
     def test_identical_structures_gives_zero(self):
-        """t-alpha of a structure against itself must be 0."""
-        coords = _all_atom_coords(100)            # (100, 3) — not a distance matrix
-        result = _t_alpha(coords, coords)
-        assert result["raw"] is not None, (
-            "t_alpha returned None for identical structures; "
-            "the alpha-shape produced no triangles — use a denser point cloud."
-        )
-        assert result["raw"] == pytest.approx(0.0, abs=1e-12)
-        assert result["norm"] == pytest.approx(0.0, abs=1e-12)
+        s = _summary(seed=0)
+        assert s.n_tri > 0, "use a denser point cloud: no alpha-shape triangles"
+        assert _t_alpha(s.log_tri, s.log_tri) == pytest.approx(0.0, abs=1e-12)
 
-    def test_raw_non_negative(self):
-        """t-alpha raw must be >= 0."""
-        ca = _all_atom_coords(100, seed=1)        # (100, 3)
-        cb = _all_atom_coords(100, seed=2)        # (100, 3) — different structure
-        result = _t_alpha(ca, cb)
-        assert result["raw"] is not None
-        assert result["raw"] >= 0.0
+    def test_non_negative_and_symmetric(self):
+        a, b = _summary(seed=1), _summary(seed=2)
+        assert _t_alpha(a.log_tri, b.log_tri) >= 0.0
+        assert _t_alpha(a.log_tri, b.log_tri) == pytest.approx(_t_alpha(b.log_tri, a.log_tri))
 
-    def test_norm_non_negative(self):
-        """t-alpha normalised must be >= 0."""
-        ca = _all_atom_coords(100, seed=3)
-        cb = _all_atom_coords(100, seed=4)
-        result = _t_alpha(ca, cb)
-        assert result["norm"] is not None
-        assert result["norm"] >= 0.0
+    def test_dimensionless_order_of_magnitude(self):
+        a, b = _summary(seed=10), _summary(seed=11)
+        assert _t_alpha(a.log_tri, b.log_tri) < 10.0
 
-    def test_norm_dimensionless_order_of_magnitude(self):
-        """For two random structures with similar scale, normalised t-alpha should be < 10."""
-        ca = _all_atom_coords(100, seed=10)
-        cb = _all_atom_coords(100, seed=11)
-        result = _t_alpha(ca, cb)
-        assert result["norm"] is not None
-        assert result["norm"] < 10.0
-
-    def test_returns_none_for_too_few_points(self):
-        """t-alpha must return None when fewer than 4 points are provided."""
-        tiny = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])  # 3 points
-        normal = _all_atom_coords(100)
-        result = _t_alpha(tiny, normal)
-        assert result["raw"] is None
-
-    def test_triangle_counts_are_non_negative(self):
-        """n_triangles_a and n_triangles_b must be non-negative integers."""
-        ca = _all_atom_coords(100, seed=5)
-        cb = _all_atom_coords(100, seed=6)
-        result = _t_alpha(ca, cb)
-        assert result["n_triangles_a"] >= 0
-        assert result["n_triangles_b"] >= 0
+    def test_none_for_too_few_atoms(self):
+        tiny = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        s = _summary(atoms=tiny)
+        assert s.log_tri is None and s.n_tri == 0
+        assert _t_alpha(s.log_tri, _summary().log_tri) is None
 
 
 # ---------------------------------------------------------------------------
-# w-rdist
-# (correctly takes (N, N) distance matrices — _dist_matrix usage is right here)
+# w-rdist — two 1-D samples of Cα–Cα distances, any lengths
 # ---------------------------------------------------------------------------
 
 class TestWRdist:
     def test_identical_structures_gives_zero(self):
-        """w-rdist of a structure against itself must be 0."""
-        coords = _random_coords(30)
-        D = _dist_matrix(coords)
-        result = _w_rdist(D, D)
+        s = _summary(seed=3)
+        result = _w_rdist(s.dists, s.dists)
         assert result["raw"] == pytest.approx(0.0, abs=1e-10)
         assert result["norm"] == pytest.approx(0.0, abs=1e-10)
 
-    def test_raw_non_negative(self):
-        """w-rdist raw must be >= 0."""
-        ca = _random_coords(20, seed=5)
-        cb = _random_coords(20, seed=6)
-        result = _w_rdist(_dist_matrix(ca), _dist_matrix(cb))
-        assert result["raw"] >= 0.0
-
     def test_norm_is_log10_compressed_raw(self):
-        """w-rdist norm must equal log10(raw + 1)."""
         import math
-        ca = _random_coords(25, seed=7)
-        cb = _random_coords(25, seed=8)
-        result = _w_rdist(_dist_matrix(ca), _dist_matrix(cb))
-        expected_norm = math.log10(result["raw"] + 1.0)
-        assert result["norm"] == pytest.approx(expected_norm, abs=1e-12)
+        a, b = _summary(seed=7), _summary(seed=8)
+        result = _w_rdist(a.dists, b.dists)
+        assert result["raw"] >= 0.0
+        assert result["norm"] == pytest.approx(math.log10(result["raw"] + 1.0), abs=1e-12)
 
     def test_symmetric(self):
-        """w-rdist(A, B) must equal w-rdist(B, A) since Wasserstein is symmetric."""
-        ca = _random_coords(20, seed=9)
-        cb = _random_coords(20, seed=10)
-        r1 = _w_rdist(_dist_matrix(ca), _dist_matrix(cb))
-        r2 = _w_rdist(_dist_matrix(cb), _dist_matrix(ca))
-        assert r1["raw"] == pytest.approx(r2["raw"], abs=1e-10)
+        a, b = _summary(seed=9), _summary(seed=10)
+        assert _w_rdist(a.dists, b.dists)["raw"] == pytest.approx(_w_rdist(b.dists, a.dists)["raw"])
+
+    def test_different_lengths_allowed(self):
+        """No correspondence: a 100-residue and an 80-residue chain are compared directly."""
+        a, b = _summary(n_res=100, seed=1), _summary(n_res=80, seed=2)
+        assert len(a.dists) != len(b.dists)
+        assert _w_rdist(a.dists, b.dists)["raw"] > 0.0
 
 
 # ---------------------------------------------------------------------------
-# Circular embedding
-# ---------------------------------------------------------------------------
-
-class TestAnglesCircular:
-    def test_output_shape(self):
-        """Circular embedding should produce (N, 4) output from (N, 2) input."""
-        angles = np.array([[0.0, 90.0], [180.0, -90.0], [45.0, 135.0]])
-        emb = _angles_to_circular(angles)
-        assert emb.shape == (3, 4)
-
-    def test_known_values(self):
-        """phi=0 → cos(0)=1, sin(0)=0; psi=90 → cos(90)=0, sin(90)=1."""
-        angles = np.array([[0.0, 90.0]])
-        emb = _angles_to_circular(angles)
-        np.testing.assert_allclose(emb[0, 0], 1.0, atol=1e-10)   # cos(phi=0)
-        np.testing.assert_allclose(emb[0, 1], 0.0, atol=1e-10)   # sin(phi=0)
-        np.testing.assert_allclose(emb[0, 2], 0.0, atol=1e-10)   # cos(psi=90)
-        np.testing.assert_allclose(emb[0, 3], 1.0, atol=1e-10)   # sin(psi=90)
-
-    def test_180_minus180_are_same_point(self):
-        """Circular embedding must map +180 and -180 to the same point."""
-        plus180  = _angles_to_circular(np.array([[180.0, 180.0]]))
-        minus180 = _angles_to_circular(np.array([[-180.0, -180.0]]))
-        np.testing.assert_allclose(plus180, minus180, atol=1e-10)
-
-    def test_unit_circle_norm(self):
-        """Each (cos θ, sin θ) pair must lie on the unit circle."""
-        angles = np.random.default_rng(0).uniform(-180, 180, (50, 2))
-        emb = _angles_to_circular(angles)
-        phi_norms = emb[:, 0]**2 + emb[:, 1]**2
-        psi_norms = emb[:, 2]**2 + emb[:, 3]**2
-        np.testing.assert_allclose(phi_norms, 1.0, atol=1e-10)
-        np.testing.assert_allclose(psi_norms, 1.0, atol=1e-10)
-
-
-# ---------------------------------------------------------------------------
-# b-phipsi
+# b-phipsi — raw (phi, psi) in degrees, 2-D Gaussian (as in Machaon)
 # ---------------------------------------------------------------------------
 
 class TestBPhipsi:
-    def _helix_angles(self, n: int, noise: float = 2.0, seed: int = 0) -> np.ndarray:
-        """Generate approximate alpha-helix phi/psi angles with small noise."""
-        rng = np.random.default_rng(seed)
-        angles = np.full((n, 2), [-60.0, -45.0])
-        angles += rng.standard_normal((n, 2)) * noise
-        return angles
-
     def test_identical_distributions_near_zero(self):
-        """b-phipsi of identical angle distributions must be ~0."""
-        angles = self._helix_angles(30)
-        result = _b_phipsi(angles, angles)
-        assert result is not None
-        assert result == pytest.approx(0.0, abs=1e-6)
+        s = _summary(angles=_helix_angles(30))
+        assert _b_phipsi(s, s) == pytest.approx(0.0, abs=1e-9)
 
-    def test_returns_none_below_min_samples(self):
-        """b-phipsi must return None when either array is too small."""
-        angles_ok   = self._helix_angles(MIN_B_PHIPSI_SAMPLES + 5)
-        angles_small = self._helix_angles(MIN_B_PHIPSI_SAMPLES - 1)
-        assert _b_phipsi(angles_small, angles_ok)   is None
-        assert _b_phipsi(angles_ok,   angles_small) is None
-
-    def test_returns_none_for_none_input(self):
-        """b-phipsi must return None if either input is None."""
-        angles = self._helix_angles(20)
-        assert _b_phipsi(None,   angles) is None
-        assert _b_phipsi(angles, None)   is None
-
-    def test_helix_vs_strand_is_larger_than_helix_vs_helix(self):
-        """Two different secondary structure distributions should give a larger
-        Bhattacharyya distance than two samples from the same distribution."""
-        helix  = self._helix_angles(40, seed=1)
-        helix2 = self._helix_angles(40, seed=2)     # same secondary structure
-        # Beta-strand approximate angles
-        rng = np.random.default_rng(99)
-        strand = rng.standard_normal((40, 2)) * 3 + np.array([-120.0, 130.0])
-
-        d_same      = _b_phipsi(helix, helix2)
-        d_different = _b_phipsi(helix, strand)
-
-        assert d_same is not None
-        assert d_different is not None
-        assert d_different > d_same
-
-    def test_non_negative(self):
-        """Bhattacharyya distance must always be >= 0."""
-        a = self._helix_angles(20, seed=3)
-        b = self._helix_angles(20, seed=4)
-        result = _b_phipsi(a, b)
-        assert result is not None
-        assert result >= 0.0
+    def test_none_below_min_samples(self):
+        ok = _summary(angles=_helix_angles(MIN_B_PHIPSI_SAMPLES + 5))
+        small = _summary(angles=_helix_angles(MIN_B_PHIPSI_SAMPLES - 1))
+        assert _b_phipsi(small, ok) is None
+        assert _b_phipsi(ok, small) is None
 
     def test_exactly_min_samples_accepted(self):
-        """Exactly MIN_B_PHIPSI_SAMPLES should be accepted (boundary case)."""
-        angles = self._helix_angles(MIN_B_PHIPSI_SAMPLES)
-        result = _b_phipsi(angles, angles)
-        # Identical → ~0, or at least not None
-        assert result is not None
+        s = _summary(angles=_helix_angles(MIN_B_PHIPSI_SAMPLES))
+        assert _b_phipsi(s, s) is not None
 
+    def test_degenerate_covariance_gives_none(self):
+        """All pairs identical -> det(cov) = 0 -> undefined (Machaon returns False)."""
+        flat = _summary(angles=np.tile([-60.0, -45.0], (20, 1)))
+        assert flat.pp_det <= 0
+        assert _b_phipsi(flat, _summary()) is None
 
-# ---------------------------------------------------------------------------
-# Bhattacharyya distance (internal)
-# ---------------------------------------------------------------------------
+    def test_helix_vs_strand_larger_than_helix_vs_helix(self):
+        helix1 = _summary(angles=_helix_angles(40, seed=1))
+        helix2 = _summary(angles=_helix_angles(40, seed=2))
+        strand = _summary(angles=_strand_angles(40))
+        assert _b_phipsi(helix1, strand) > _b_phipsi(helix1, helix2) >= 0.0
+
 
 class TestBhattacharyyaDistance:
-    def test_identical_distributions_zero(self):
-        """Bhattacharyya distance between a distribution and itself must be 0."""
-        rng = np.random.default_rng(0)
-        samples = rng.standard_normal((30, 4))
-        d = _bhattacharyya_distance(samples, samples)
-        assert d == pytest.approx(0.0, abs=1e-6)
+    @staticmethod
+    def _gaussian(samples):
+        cov = np.cov(samples.T)
+        return samples.mean(axis=0), cov, float(np.linalg.det(cov))
 
-    def test_non_negative(self):
-        rng = np.random.default_rng(1)
-        a = rng.standard_normal((25, 4))
-        b = rng.standard_normal((25, 4)) + 1.0
-        d = _bhattacharyya_distance(a, b)
-        assert d >= 0.0
+    def test_identical_distributions_zero(self):
+        g = self._gaussian(np.random.default_rng(0).standard_normal((30, 2)))
+        assert _bhattacharyya_distance(*g, *g) == pytest.approx(0.0, abs=1e-9)
 
     def test_increases_with_separation(self):
-        """Moving two Gaussians further apart should increase Bhattacharyya distance."""
-        rng = np.random.default_rng(2)
-        base = rng.standard_normal((40, 4))
-        shifted_small = base + 0.5
-        shifted_large = base + 5.0
-        d_small = _bhattacharyya_distance(base, shifted_small)
-        d_large = _bhattacharyya_distance(base, shifted_large)
-        assert d_large > d_small
+        base = np.random.default_rng(2).standard_normal((40, 2))
+        g0, g_small, g_large = (self._gaussian(base + k) for k in (0.0, 0.5, 5.0))
+        assert _bhattacharyya_distance(*g0, *g_large) > _bhattacharyya_distance(*g0, *g_small) > 0.0
+
+    def test_degenerate_returns_none(self):
+        g = self._gaussian(np.random.default_rng(1).standard_normal((30, 2)))
+        mean, cov, _ = g
+        assert _bhattacharyya_distance(mean, cov, 0.0, *g) is None
+
+
+# ---------------------------------------------------------------------------
+# The Machaon metrics need no residue correspondence
+# ---------------------------------------------------------------------------
+
+class TestAlignmentFree:
+    def test_residue_order_does_not_matter(self):
+        """Shuffling the residues of a structure leaves all three metrics at 0,
+        while an RMSD that pairs residue i with residue i becomes large."""
+        rng = np.random.default_rng(0)
+        ca = _random_coords(60, seed=4) * 10
+        angles = _helix_angles(60, noise=10.0, seed=4)
+        atoms = _all_atom_coords(100, seed=4)
+        original = summary_from_arrays(ca, "A" * 60, angles, atoms)
+        shuffled = summary_from_arrays(
+            ca[rng.permutation(60)], "A" * 60,
+            angles[rng.permutation(60)], atoms[rng.permutation(100)],
+        )
+        m = compute_all_metrics(original, shuffled)
+        assert m["b_phipsi"] == pytest.approx(0.0, abs=1e-9)
+        assert m["w_rdist_raw"] == pytest.approx(0.0, abs=1e-10)
+        assert m["t_alpha"] == pytest.approx(0.0, abs=1e-12)
+        assert _kabsch_rmsd(original.ca, shuffled.ca) > 1.0
+
+    def test_different_lengths_no_alignment(self):
+        m = compute_all_metrics(_summary(n_res=100, seed=1), _summary(n_res=80, seed=2))
+        assert m["w_rdist_norm"] is not None
+        assert m["b_phipsi"] is not None
+        assert m["t_alpha"] is not None
+        assert m["rmsd"] is None        # no PairAlignment -> no residue pairing -> no RMSD
+
+
+class TestComputeAllMetrics:
+    def test_rmsd_only_with_reliable_pairing(self):
+        s = _summary(seed=5)
+        pairs = lambda: (s.ca, s.ca)
+        reliable = SimpleNamespace(rmsd_reliable=True, matched_coords=pairs)
+        unreliable = SimpleNamespace(rmsd_reliable=False, matched_coords=pairs)
+        assert compute_all_metrics(s, s, reliable)["rmsd"] == pytest.approx(0.0, abs=1e-9)
+        assert compute_all_metrics(s, s, unreliable)["rmsd"] is None
+
+    def test_output_keys_unchanged(self):
+        s = _summary()
+        assert set(compute_all_metrics(s, s)) == {
+            "rmsd", "t_alpha", "t_alpha_n_tri_a", "t_alpha_n_tri_b",
+            "w_rdist_raw", "w_rdist_norm", "b_phipsi", "b_phipsi_n_a", "b_phipsi_n_b",
+        }

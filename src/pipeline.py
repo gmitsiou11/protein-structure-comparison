@@ -1,13 +1,14 @@
 """
-Pipeline orchestrator, is the primary entry point for a full scientifically valid run.
-It:
-  1. Validates each structure pair (via ``validation.py``).
+Pipeline orchestrator: the entry point for a full run.  For every protein it
+  1. Describes each structure pair (alignment statistics, via ``alignment.py``).
   2. Extracts structural metadata (method, resolution, pLDDT, etc.).
-  3. Computes all metrics from pre-validated data — NO re-alignment.
+  3. Summarises each structure once (whole chain) and computes the Machaon
+     metrics from the two summaries — no alignment involved; RMSD only when
+     the residue pairing is reliable.
   4. Assigns a comparison category (exp_vs_exp, exp_vs_af2, …).
   5. Emits a self-documenting JSON record for every comparison.
-  6. Runs the statistical analysis layer over all valid records.
-  7. Emits a rejection record (with reason) for every failed pair.
+  6. Runs the statistical analysis layer over all computed records.
+  7. Emits a rejection record (with reason) for every pair that cannot be read.
 
 
 NMR ensemble handling
@@ -15,14 +16,17 @@ NMR ensemble handling
 NMR structures deposit multiple models (conformers) representing the
 conformational ensemble sampled in solution.  This pipeline:
 
-  1. Uses the representative model (``nmr_model`` from proteins.csv) for
-     all NMR-vs-experimental and NMR-vs-AI comparisons.
-  2. Separately computes INTRA-ensemble variability by comparing model 0
-     against ALL other deposited models.
-  3. Reports mean ± std across all model-0-vs-model-k comparisons as the
-     "NMR flexibility baseline".
-
-The NMR baseline is included as a reference point, not a benchmark to be beaten.
+  1. Picks one model per NMR entry by a rule (``nmr_model_policy``, see
+     src/nmr.py: the ensemble medoid by default, the model the PDB names as
+     representative, or the first model) and uses it for all
+     NMR-vs-experimental and NMR-vs-AI comparisons.
+  2. Separately compares that representative model with every other model of
+     its ensemble (category "nmr_intra_ensemble"): the spread of one NMR
+     experiment, part flexibility in solution and part how loosely the
+     restraints define the structure.  It is a reference level, not a
+     benchmark to be beaten.
+  3. Writes nmr_models.csv: the model used for each protein, the rule that
+     chose it, and the alternatives (PDB-designated, medoid).
 
 """
 
@@ -32,6 +36,7 @@ import datetime
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import traceback
 from collections import defaultdict
@@ -44,10 +49,11 @@ import gemmi as _gemmi
 import scipy as _scipy
 import Bio as _Bio
 
-from src.metrics import compute_all_metrics
-from src.metadata import extract_metadata, plddt_on_matched_residues, StructureMetadata
-from src.validation import validate_pair, validate_and_report, ValidationResult
+from src.metrics import compute_all_metrics, summarise_structure
+from src.metadata import extract_metadata, StructureMetadata
+from src.alignment import align_pair, align_and_report, PairAlignment
 from src.analysis import analyse, infer_category, summarise_rejections
+from src.nmr import choose_nmr_model, POLICIES as NMR_POLICIES
 
 _REQUIRED_CSV_COLUMNS = {
     "protein_name",
@@ -55,8 +61,9 @@ _REQUIRED_CSV_COLUMNS = {
     "pdb_xray",
     "pdb_nmr",
     "pdb_cryoem",
-    "chain_id",
-    "nmr_model",
+    "chain_xray",
+    "chain_nmr",
+    "chain_cryoem",
 }
 
 
@@ -69,15 +76,32 @@ def _file_md5(path: str) -> str:
     return h.hexdigest()
 
 
+def _git_state() -> dict:
+    """git_commit and git_dirty of the repository the code runs from (None outside git)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", root, *args], capture_output=True, text=True, timeout=10, check=True
+        ).stdout.strip()
+
+    try:
+        return {"git_commit": git("rev-parse", "HEAD"), "git_dirty": bool(git("status", "--porcelain", "--", "src"))}
+    except (OSError, subprocess.SubprocessError):
+        return {"git_commit": None, "git_dirty": None}
+
+
 def _build_run_metadata(cif_paths: set[str]) -> dict:
     """
     Build a provenance record for the current pipeline run.
 
-    Includes timestamp, library versions, and MD5 checksums of all input
-    CIF files so that re-runs with silently updated structures can be detected.
+    Includes timestamp, the git commit of the code (with a flag for uncommitted
+    changes), library versions, and MD5 checksums of all input CIF files so that
+    re-runs with silently updated structures can be detected.
     """
     return {
-        "run_timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "run_timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
+        **_git_state(),
         "python_version": sys.version,
         "library_versions": {
             "gemmi": _gemmi.__version__,
@@ -151,16 +175,18 @@ def compare_pair(
     verbose: bool = True,
 ) -> dict:
     """
-    Validate and compare two structures, returning a self-documenting record.
+    Compare two structures, returning a self-documenting record.
 
-    This function ALWAYS returns a dict.  The ``"status"`` field indicates the
+    This function always returns a dict.  The ``"status"`` field indicates the
     outcome:
-      - ``"ok"``            — comparison succeeded; all metric fields populated.
-      - ``"rejected"``      — failed validation; ``"rejection_reason"`` explains why.
-      - ``"metric_error"``  — passed validation but metric computation failed;
+      - ``"ok"``            — comparison succeeded; metric fields populated
+                              (``rmsd`` is None when ``rmsd_reliable`` is False).
+      - ``"rejected"``      — a structure could not be read; ``"rejection_reason"``
+                              explains why.
+      - ``"metric_error"``  — metric computation failed;
                               ``"rejection_reason"`` contains the traceback.
 
-    Every returned dict includes validation metadata so results are
+    Every returned dict includes the alignment summary, so results are
     self-documenting even for failed comparisons.
 
     The returned dict contains:
@@ -168,7 +194,7 @@ def compare_pair(
       - Structural scope tag (comparison_scope = "chain_level")
       - is_intra_ensemble flag (False for regular comparisons)
       - Status and rejection reason
-      - Full validation summary (n_matched, coverage_a, coverage_b, seq_identity,
+      - Alignment summary (n_matched, coverage_a, coverage_b, seq_identity,
         n_mismatches, n_gaps, x_frac_a, x_frac_b, warnings)
       - Metadata for both structures (method, resolution, pLDDT, plddt_confirmed)
       - All metric values (when status = "ok")
@@ -198,7 +224,7 @@ def compare_pair(
         "notes": notes,
     }
 
-    val: ValidationResult = validate_and_report(
+    val: PairAlignment = align_and_report(
         path_a,
         path_b,
         label=label,
@@ -260,53 +286,30 @@ def compare_pair(
         model_idx=model_idx_b,
     )
 
-    plddt_matched_a = (
-        plddt_on_matched_residues(meta_a, val.idx_a) if val.idx_a is not None else None
-    )
-    plddt_matched_b = (
-        plddt_on_matched_residues(meta_b, val.idx_b) if val.idx_b is not None else None
-    )
-
     try:
-        metric_values = compute_all_metrics(val)
+        summary_a = summarise_structure(path_a, model_idx_a, cid_a)
+        summary_b = summarise_structure(path_b, model_idx_b, cid_b)
+        metric_values = compute_all_metrics(summary_a, summary_b, val)
     except Exception as exc:
         if verbose:
             print(f"    [ERROR] Metric computation failed: {exc}")
             traceback.print_exc()
         base["status"] = "metric_error"
         base["rejection_reason"] = f"Metric computation failed: {exc}"
-        _embed_metadata(
-            base,
-            meta_a,
-            meta_b,
-            model_idx_a,
-            model_idx_b,
-            plddt_matched_a,
-            plddt_matched_b,
-        )
+        _embed_metadata(base, meta_a, meta_b, model_idx_a, model_idx_b)
         return base
 
-    _embed_metadata(
-        base, meta_a, meta_b, model_idx_a, model_idx_b, plddt_matched_a, plddt_matched_b
-    )
+    _embed_metadata(base, meta_a, meta_b, model_idx_a, model_idx_b)
 
     base.update(
         {
-            "rmsd": round(metric_values["rmsd"], 6),
-            "t_alpha": (
-                round(metric_values["t_alpha"], 6)
-                if metric_values["t_alpha"] is not None
-                else None
-            ),
-            "t_alpha_n_tri_a": metric_values.get("t_alpha_n_tri_a"),
-            "t_alpha_n_tri_b": metric_values.get("t_alpha_n_tri_b"),
-            "w_rdist_raw": round(metric_values["w_rdist_raw"], 6),
-            "w_rdist_norm": round(metric_values["w_rdist_norm"], 6),
-            "b_phipsi": (
-                round(metric_values["b_phipsi"], 6)
-                if metric_values["b_phipsi"] is not None
-                else None
-            ),
+            "rmsd": _round6(metric_values["rmsd"]),
+            "t_alpha": _round6(metric_values["t_alpha"]),
+            "t_alpha_n_tri_a": metric_values["t_alpha_n_tri_a"],
+            "t_alpha_n_tri_b": metric_values["t_alpha_n_tri_b"],
+            "w_rdist_raw": _round6(metric_values["w_rdist_raw"]),
+            "w_rdist_norm": _round6(metric_values["w_rdist_norm"]),
+            "b_phipsi": _round6(metric_values["b_phipsi"]),
             "b_phipsi_n_a": metric_values["b_phipsi_n_a"],
             "b_phipsi_n_b": metric_values["b_phipsi_n_b"],
         }
@@ -315,14 +318,17 @@ def compare_pair(
     return base
 
 
+def _round6(value: Optional[float]) -> Optional[float]:
+    """Round a metric value to 6 decimals; keep None (metric not defined)."""
+    return round(value, 6) if value is not None else None
+
+
 def _embed_metadata(
     base: dict,
     meta_a: StructureMetadata,
     meta_b: StructureMetadata,
     model_idx_a: int,
     model_idx_b: int,
-    plddt_matched_a: Optional[float],
-    plddt_matched_b: Optional[float],
 ) -> None:
     """Embed metadata for both structures into the record dict (in-place)."""
     base.update(
@@ -331,28 +337,32 @@ def _embed_metadata(
             "pdb_id_a": meta_a.pdb_id,
             "model_idx_a": model_idx_a,
             "resolution_a": meta_a.resolution,
+            "deposition_date_a": meta_a.deposition_date,
+            "release_date_a": meta_a.release_date,
+            "title_a": meta_a.title or None,
+            "n_polymer_chains_a": meta_a.n_polymer_chains,
             "n_models_a": meta_a.n_models,
             "is_af_a": meta_a.is_alphafold,
             "af_version_a": meta_a.af_version,
             "plddt_mean_a": meta_a.plddt_mean,
             "plddt_confirmed_a": meta_a.plddt_source_confirmed,
             "plddt_note_a": meta_a.plddt_note or None,
-            "plddt_matched_a": (
-                round(plddt_matched_a, 2) if plddt_matched_a is not None else None
-            ),
+            "msa_depth_a": meta_a.msa_depth,
             "method_b": meta_b.method_category,
             "pdb_id_b": meta_b.pdb_id,
             "model_idx_b": model_idx_b,
             "resolution_b": meta_b.resolution,
+            "deposition_date_b": meta_b.deposition_date,
+            "release_date_b": meta_b.release_date,
+            "title_b": meta_b.title or None,
+            "n_polymer_chains_b": meta_b.n_polymer_chains,
             "n_models_b": meta_b.n_models,
             "is_af_b": meta_b.is_alphafold,
             "af_version_b": meta_b.af_version,
             "plddt_mean_b": meta_b.plddt_mean,
             "plddt_confirmed_b": meta_b.plddt_source_confirmed,
             "plddt_note_b": meta_b.plddt_note or None,
-            "plddt_matched_b": (
-                round(plddt_matched_b, 2) if plddt_matched_b is not None else None
-            ),
+            "msa_depth_b": meta_b.msa_depth,
             "organism": meta_a.organism or meta_b.organism,
         }
     )
@@ -367,10 +377,8 @@ def compute_nmr_ensemble_variability(
     verbose: bool = True,
 ) -> list[dict]:
     """
-    Quantify within-ensemble variability for an NMR structure.
-
-    Compares the manifest-selected representative model against all other
-    deposited models.
+    The spread of one NMR ensemble: the representative model (chosen by
+    src/nmr.py) compared with every other deposited model, one record each.
     """
     from src.parser import load_structure
 
@@ -424,8 +432,8 @@ def compute_nmr_ensemble_variability(
             pdb_id_a="",
             pdb_id_b="",
             notes=(
-                "Intra-ensemble comparison: quantifies NMR conformational flexibility baseline. "
-                "Interpret separately from experimental-vs-AI comparisons."
+                "Intra-ensemble comparison: the spread of one NMR experiment. "
+                "Interpret separately from the comparisons between structures."
             ),
             verbose=verbose,
         )
@@ -433,79 +441,10 @@ def compute_nmr_ensemble_variability(
         rec["comparison"] = f"nmr_intra_model{representative_model}_vs_model{model_b}"
         rec["category"] = "nmr_intra_ensemble"
         rec["is_intra_ensemble"] = True
-        rec["nmr_flexibility_note"] = (
-            "NMR intra-ensemble variability reflects solution-state conformational flexibility "
-            "— physically real molecular motions, not measurement error. "
-            "This is FUNDAMENTALLY DIFFERENT from X-ray/Cryo-EM single-conformation "
-            "uncertainty or AI prediction error. Use as a reference baseline only."
-        )
 
         records.append(rec)
 
     return records
-
-
-def aggregate_nmr_variability(
-    intra_records: list[dict],
-    protein_name: str,
-) -> dict:
-    """
-    Aggregate intra-NMR comparison records into mean ± std statistics.
-
-    This summary is the "NMR flexibility baseline" for the protein: the
-    typical within-ensemble deviation across all metric dimensions.
-
-    Returns
-    -------
-    Dict with:
-      protein_name, nmr_baseline_available, n_model_comparisons,
-      interpretation note, per-metric mean/std/min/max.
-    """
-    ok_records = [r for r in intra_records if r.get("status") == "ok"]
-    all_records_n = len(intra_records)
-    ok_n = len(ok_records)
-
-    metric_names = [
-        "rmsd",
-        "t_alpha",
-        "w_rdist_raw",
-        "w_rdist_norm",
-        "b_phipsi",
-    ]
-
-    summary: dict = {
-        "protein_name": protein_name,
-        "nmr_baseline_available": ok_n > 0,
-        "n_model_pairs_attempted": all_records_n,
-        "n_model_pairs_ok": ok_n,
-        "interpretation": (
-            "Mean ± std across all representative-model-vs-other-model comparisons within the NMR ensemble. "
-            "This quantifies the conformational flexibility captured by the deposited models.  "
-            "Values represent solution-state dynamics, not prediction error or measurement "
-            "uncertainty.  Use as a reference point when interpreting AI-vs-experimental "
-            "deviations: if AI metrics fall within the intra-NMR range for this protein, "
-            "the AI prediction is compatible with one of the accessible conformations."
-        ),
-        "metrics": {},
-    }
-
-    for m in metric_names:
-        vals = [
-            r[m]
-            for r in ok_records
-            if r.get(m) is not None and not np.isnan(float(r.get(m, float("nan"))))
-        ]
-        if vals:
-            arr = np.array(vals, dtype=float)
-            summary["metrics"][m] = {
-                "mean": round(float(np.mean(arr)), 4),
-                "std": round(float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0, 4),
-                "min": round(float(np.min(arr)), 4),
-                "max": round(float(np.max(arr)), 4),
-                "n": len(arr),
-            }
-
-    return summary
 
 
 _PIPELINE_METADATA = {
@@ -516,14 +455,16 @@ _PIPELINE_METADATA = {
         "Each record carries comparison_scope = 'chain_level' as a short tag."
     ),
     "statistical_interpretation_note": (
-        "Given only 1–3 exp-vs-exp comparison pairs per protein, classical hypothesis "
-        "tests (t-test, ANOVA) are severely underpowered and are not reported.  "
-        "Cohen's d and variance ratios are presented as DESCRIPTIVE effect sizes only.  "
-        "The within-range check (AI value within exp_vs_exp ± 1σ) is an OPERATIONAL "
-        "COMPARISON, not a statistical test.  Finding that AI metrics fall within "
-        "experimental variability does NOT prove that AI replaces experiments — it is "
-        "a necessary but not sufficient condition. The actual protein count (N) is "
-        "reported in the analysis summary_text field."
+        "The unit of analysis is the protein: the comparison pairs of one protein "
+        "share structures and are not independent.  For each protein and metric the "
+        "experimental variability is the median distance between its experimental "
+        "structures, and a prediction is within experimental variability when its "
+        "median distance to them is not larger.  Across proteins the analysis reports "
+        "fractions, medians and paired effect sizes with 95 % bootstrap intervals "
+        "(proteins resampled), for all proteins and for those without flagged "
+        "experimental structures.  It is descriptive: no hypothesis test is run.  "
+        "'Within experimental variability' is a necessary but not sufficient "
+        "condition for claiming that a prediction can replace an experiment."
     ),
     "plddt_note": (
         "AF2 pLDDT is extracted from B_iso_or_equiv (well-documented convention). "
@@ -533,10 +474,13 @@ _PIPELINE_METADATA = {
     ),
     "nmr_intra_ensemble_note": (
         "NMR intra-ensemble records (is_intra_ensemble=True) are included in "
-        "all_metrics_validated.json for completeness but are EXCLUDED from the main "
-        "statistical analysis.  They are reported separately in nmr_variability.json.  "
-        "Filter on category != 'nmr_intra_ensemble' or is_intra_ensemble == False "
-        "to obtain only the primary comparison records."
+        "comparisons.json.  They are the spread of one NMR experiment (part "
+        "flexibility in solution, part restraint uncertainty) and are never pooled "
+        "with the other comparisons: the protein-level analysis "
+        "uses them as a second baseline (is the prediction no farther from the "
+        "representative NMR model than the farthest other model of the ensemble?).  "
+        "Filter on category != "
+        "'nmr_intra_ensemble' to obtain only the primary comparison records."
     ),
 }
 
@@ -547,31 +491,44 @@ def run_pipeline(
     output_dir: str = "results",
     verbose: bool = True,
     include_nmr_ensemble: bool = True,
+    nmr_model_policy: str = "medoid",
 ) -> dict:
     """
-    Run the full validated comparison pipeline.
+    Run the full comparison pipeline.
 
     Parameters
-    ----
+    ----------
     proteins_csv          : path to the dataset manifest.
     data_dir              : root directory with experimental/, alphafold2/, openfold3/.
     output_dir            : where to write all output JSON files.
     verbose               : print progress to stdout.
     include_nmr_ensemble  : whether to compute intra-NMR ensemble variability.
+    nmr_model_policy      : which model of an NMR ensemble stands for the entry:
+                            "medoid" (default), "pdb" or "first" (model 0).
+                            See src/nmr.py.
 
     Returns
     -------
     Dict with:
       "comparisons"              : list of all records (ok + intra-ensemble)
       "rejected"                 : list of rejected/failed records (with reasons)
-      "nmr_variability"          : per-protein NMR flexibility baselines
       "analysis"                 : statistical analysis output
-      "per_protein_summary"      : per-protein interpretation summaries
+      "per_protein_summary"      : one row per protein (analysis.protein_table)
       "pipeline_metadata"        : documentation of scope, exclusions, caveats
       "run_metadata"             : timestamp, library versions, input checksums
     """
+    if nmr_model_policy not in NMR_POLICIES:
+        raise ValueError(
+            f"nmr_model_policy must be one of {NMR_POLICIES}, got {nmr_model_policy!r}"
+        )
     os.makedirs(output_dir, exist_ok=True)
-    df = pd.read_csv(proteins_csv)
+    df = pd.read_csv(proteins_csv, dtype=str, keep_default_na=False)
+    shared_names = sorted(set(df.loc[df["protein_name"].duplicated(), "protein_name"]))
+    if shared_names:
+        raise ValueError(
+            f"protein_name must be unique in {proteins_csv} (it is used as a key); "
+            f"duplicated: {shared_names}"
+        )
 
     missing_cols = _REQUIRED_CSV_COLUMNS - set(df.columns)
     if missing_cols:
@@ -582,39 +539,52 @@ def run_pipeline(
 
     all_records: list[dict] = []
     rejected: list[dict] = []
-    nmr_variability: dict[str, dict] = {}
     missing_inputs: list[dict] = []
+    nmr_model_rows: list[dict] = []
     all_cif_paths: set[str] = set()
 
     for _, row in df.iterrows():
         protein_name = row["protein_name"]
         uniprot_id = row["uniprot_id"]
-        chain_id = str(row.get("chain_id", "A")).strip()
-        # chain_id_af2: chain to use for AF2/OF3 structures.  AF2/OF3 always
-        # deposit as a single chain labelled "A", so the default is always "A".
-        # Experimental structures in multi-subunit complexes may use a different
-        # chain letter (e.g. "B" for hemoglobin beta), so chain_id stays as-is.
-        _raw_af2_chain = row.get("chain_id_af2", None)
-        if _raw_af2_chain is None or (
-            isinstance(_raw_af2_chain, float) and pd.isna(_raw_af2_chain)
-        ):
-            chain_id_af2 = "A"
-        else:
-            chain_id_af2 = str(_raw_af2_chain).strip() or "A"
+        # One chain per method, chosen by src/dataset.py; predictions are always chain A.
+        chains = {
+            "X-ray": row["chain_xray"].strip(),
+            "NMR": row["chain_nmr"].strip(),
+            "Cryo-EM": row["chain_cryoem"].strip(),
+            "AF2": "A",
+            "OF3": "A",
+        }
 
         def _chain_for(method: str) -> str:
-            """Return the correct chain ID for the given method category."""
-            return chain_id_af2 if method in ("AF2", "OF3") else chain_id
-
-        nmr_model = (
-            int(row.get("nmr_model", 0))
-            if not pd.isna(row.get("nmr_model", float("nan")))
-            else 0
-        )
+            """Return the chain ID to read for the given method category."""
+            return chains[method]
 
         xray_path = _exp_path(row.get("pdb_xray"), data_dir)
         nmr_path = _exp_path(row.get("pdb_nmr"), data_dir)
         cryoem_path = _exp_path(row.get("pdb_cryoem"), data_dir)
+
+        # Which model of the NMR ensemble stands for the entry (src/nmr.py)
+        nmr_model = 0
+        nmr_choice = None
+        if nmr_path and os.path.exists(nmr_path):
+            try:
+                nmr_choice = choose_nmr_model(
+                    nmr_path, _chain_for("NMR"), policy=nmr_model_policy
+                )
+                nmr_model = nmr_choice["model"]
+                nmr_model_rows.append(
+                    {
+                        "protein_name": protein_name,
+                        "uniprot_id": uniprot_id,
+                        "pdb_id": row.get("pdb_nmr"),
+                        "chain": _chain_for("NMR"),
+                        "model_used": nmr_model,
+                        **{k: v for k, v in nmr_choice.items() if k != "model"},
+                    }
+                )
+            except Exception as exc:  # unreadable file: compare_pair reports it as usual
+                if verbose:
+                    print(f"  [WARN] NMR model selection failed for {nmr_path}: {exc}")
         af2_path = _af2_path(uniprot_id, data_dir)
         of3_path = _of3_path(uniprot_id, data_dir)
 
@@ -633,7 +603,7 @@ def run_pipeline(
                         "protein_name": protein_name,
                         "uniprot_id": uniprot_id,
                         "pdb_id_or_uniprot": str(identifier),
-                        "chain_id": chain_id,
+                        "chain_id": _chain_for(structure_type),
                         "structure_type": structure_type,
                         "expected_path": expected,
                     }
@@ -770,7 +740,7 @@ def run_pipeline(
                 path_b=pb,
                 method_cat_a=ma,
                 method_cat_b=mb,
-                chain_id=chain_id,
+                chain_id=_chain_for(ma),
                 chain_id_a=_chain_for(ma),
                 chain_id_b=_chain_for(mb),
                 model_idx_a=mia,
@@ -780,6 +750,10 @@ def run_pipeline(
                 notes=notes_str,
                 verbose=verbose,
             )
+
+            if "NMR" in (ma, mb) and nmr_choice is not None:
+                rec["nmr_model_used"] = nmr_model
+                rec["nmr_model_rule"] = nmr_choice["rule"]
 
             if rec["status"] == "ok":
                 all_records.append(rec)
@@ -791,36 +765,14 @@ def run_pipeline(
                 protein_name,
                 uniprot_id,
                 nmr_path,
-                chain_id=chain_id,
+                chain_id=_chain_for("NMR"),
                 representative_model=nmr_model,
                 verbose=verbose,
             )
             all_records.extend([r for r in intra_records if r.get("status") == "ok"])
             rejected.extend([r for r in intra_records if r.get("status") != "ok"])
 
-            if intra_records:
-                ok_intra = [r for r in intra_records if r.get("status") == "ok"]
-                if ok_intra:
-                    nmr_variability[protein_name] = aggregate_nmr_variability(
-                        ok_intra, protein_name
-                    )
-
-        if protein_name not in nmr_variability:
-            nmr_variability[protein_name] = {
-                "nmr_baseline_available": False,
-                "reason": (
-                    "single-model NMR structure (no ensemble) or no NMR structure available"
-                    if nmr_path
-                    else "no NMR structure in dataset"
-                ),
-            }
-        else:
-            nmr_variability[protein_name]["nmr_baseline_available"] = True
-
-    analysis_records = [
-        r for r in all_records if r.get("category") != "nmr_intra_ensemble"
-    ]
-    analysis_result = analyse(analysis_records)
+    analysis_result = analyse(all_records)  # protein level; uses the NMR ensembles too
 
     if verbose:
         print("\n\n" + analysis_result["summary_text"])
@@ -834,7 +786,11 @@ def run_pipeline(
             f"Wrote {len(missing_inputs)} missing-input records to {missing_inputs_path}"
         )
 
-    metrics_path = os.path.join(output_dir, "all_metrics_validated.json")
+    pd.DataFrame(nmr_model_rows).to_csv(
+        os.path.join(output_dir, "nmr_models.csv"), index=False
+    )
+
+    metrics_path = os.path.join(output_dir, "comparisons.json")
     with open(metrics_path, "w") as f:
         json.dump(all_records, f, indent=2, default=str)
     if verbose:
@@ -863,21 +819,14 @@ def run_pipeline(
     if verbose:
         print(f"Wrote statistical analysis to {analysis_path}")
 
-    nmr_path_out = os.path.join(output_dir, "nmr_variability.json")
-    with open(nmr_path_out, "w") as f:
-        json.dump(nmr_variability, f, indent=2, default=str)
-    if verbose:
-        print(f"Wrote NMR flexibility baselines to {nmr_path_out}")
-
     pipeline_output = {
         "comparisons": all_records,
         "rejected": rejected,
         "missing_inputs": missing_inputs,
-        "nmr_variability": nmr_variability,
         "analysis": analysis_result,
-        "per_protein_summary": analysis_result.get("per_protein_interpretation", {}),
+        "per_protein_summary": analysis_result["per_protein"],
         "pipeline_metadata": _PIPELINE_METADATA,
-        "run_metadata": run_metadata,
+        "run_metadata": {**run_metadata, "nmr_model_policy": nmr_model_policy},
     }
 
     summary_path = os.path.join(output_dir, "pipeline_summary.json")

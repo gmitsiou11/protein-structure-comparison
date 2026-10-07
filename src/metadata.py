@@ -1,7 +1,7 @@
 """
 Extract structural, experimental, and AI-specific metadata from mmCIF files.
 
-This module does NOT compute any comparison metrics — it only reads mmCIF
+This module does not compute comparison metrics — it only reads mmCIF
 fields and returns structured objects.  Every comparison record produced by
 ``pipeline.py`` embeds this metadata so results are self-documenting.
 
@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from typing import Optional
+import json
 import re
 
 import gemmi
@@ -64,6 +65,9 @@ class StructureMetadata:
       resolution       : resolution in Å for X-ray and Cryo-EM; None for NMR
       n_models         : deposited model count (1 for X-ray/AF; >1 for NMR)
       organism         : scientific name from mmCIF
+      deposition_date  : date the entry was deposited (YYYY-MM-DD); "" if absent
+      release_date     : date the entry was first released (YYYY-MM-DD); "" if absent
+      title            : entry title (_struct.title), e.g. "... amyloid fibril"
 
     AlphaFold-specific
     ------------------
@@ -71,16 +75,19 @@ class StructureMetadata:
       af_version              : "AF2" | "OF3" | None
       plddt_mean              : mean pLDDT over Ca atoms in chain/model; None
                                 if confidence extraction failed or unconfirmed
-      plddt_per_residue       : per-Ca pLDDT list (for matched-region analysis)
       plddt_source_confirmed  : True  -- confirmed pLDDT (AF2 or OF3 NIM format)
                                 False -- values extracted but range suspicious
                                 None  -- not an AI prediction structure
+      msa_depth               : OF3 only -- sequences in the MSAs given to OpenFold3
+                                (from OF3_<id>_provenance.json); None otherwise
 
     Common
     ------
-      n_residues : Cα count for the parsed chain/model
-      chain_id   : chain identifier
-      model_idx  : model index (0-based)
+      n_residues       : Cα count for the parsed chain/model
+      n_polymer_chains : polymer chains in the model (1 = the chain alone,
+                         more = it was determined inside a complex)
+      chain_id         : chain identifier
+      model_idx        : model index (0-based)
     """
 
     # identification
@@ -94,25 +101,27 @@ class StructureMetadata:
     resolution: Optional[float] = None
     n_models: int = 1
     organism: str = ""
+    deposition_date: str = ""  # _pdbx_database_status.recvd_initial_deposition_date
+    release_date: str = ""  # first _pdbx_audit_revision_history.revision_date
+    title: str = ""  # _struct.title
 
     # AlphaFold-specific
     is_alphafold: bool = False
     af_version: Optional[str] = None
     plddt_mean: Optional[float] = None
-    plddt_per_residue: Optional[list] = None
     plddt_source_confirmed: Optional[bool] = None  # see module docstring
     plddt_note: str = ""  # human-readable note when confidence is uncertain
+    msa_depth: Optional[int] = None  # OF3: sequences in its MSAs (provenance file)
 
     # structure scope
     n_residues: int = 0
+    n_polymer_chains: int = 0
     chain_id: str = "A"
     model_idx: int = 0
 
     def to_dict(self) -> dict:
-        """Return a JSON-serialisable dict (drops the large plddt_per_residue list)."""
-        d = asdict(self)
-        d.pop("plddt_per_residue", None)
-        return d
+        """Return a JSON-serialisable dict."""
+        return asdict(self)
 
 
 _AF2_PATTERN = re.compile(r"AF[-_]?2", re.IGNORECASE)
@@ -288,6 +297,17 @@ def _get_organism(block: gemmi.cif.Block) -> str:
     return ""
 
 
+def _first_value(block: gemmi.cif.Block, tag: str) -> str:
+    """First value of an mmCIF item (single item or loop column); "" if absent."""
+    try:
+        values = block.find_values(tag)
+        if not len(values) or values[0] in ("?", "."):
+            return ""
+        return " ".join(gemmi.cif.as_string(values[0]).split())  # unquote, one line
+    except Exception:
+        return ""
+
+
 def _count_residues(structure: gemmi.Structure, model_idx: int, chain_id: str) -> int:
     from src.parser import get_ca_coords_and_seq
 
@@ -309,12 +329,12 @@ def extract_metadata(
     Parse a mmCIF file and return a populated ``StructureMetadata`` object.
 
     Parameters
-    ----
-    file_path   : path to the mmCIF file.
-    uniprot_id  : UniProt accession (from proteins.csv; also attempted from filename).
-    pdb_id      : PDB accession (experimental structures; empty for AF files).
-    chain_id    : chain to extract metrics from.
-    model_idx   : model index (0-based).
+    ----------
+    file_path     : path to the mmCIF file.
+    uniprot_id    : UniProt accession (from proteins.csv; also attempted from filename).
+    pdb_id        : PDB accession (experimental structures; empty for AF files).
+    chain_id      : chain to extract metrics from.
+    model_idx     : model index (0-based).
 
     Returns
     -------
@@ -364,17 +384,14 @@ def extract_metadata(
         if raw_biso is not None and len(raw_biso) > 0:
             if af_version == "AF2":
                 meta.plddt_mean = float(np.mean(raw_biso))
-                meta.plddt_per_residue = raw_biso.tolist()
                 meta.plddt_source_confirmed = True
 
             elif af_version == "OF3":
                 if _is_plddt_range_plausible(raw_biso):
                     meta.plddt_mean = float(np.mean(raw_biso))
-                    meta.plddt_per_residue = raw_biso.tolist()
                     meta.plddt_source_confirmed = True
                 else:
                     meta.plddt_mean = None
-                    meta.plddt_per_residue = None
                     meta.plddt_source_confirmed = False
                     meta.plddt_note = (
                         f"B_iso_or_equiv values (min={float(np.min(raw_biso)):.1f}, "
@@ -387,60 +404,56 @@ def extract_metadata(
             meta.plddt_source_confirmed = False if meta.is_alphafold else None
             meta.plddt_note = "B_iso_or_equiv column not found or empty."
 
+        if af_version == "OF3":
+            meta.msa_depth = _of3_msa_depth(file_path)
+
     else:
-        raw_method = ""
+        # _exptl.method is a loop in hybrid entries (e.g. NMR + SAXS): keep every
+        # method in `method`, and the first recognised one as the category
+        methods = []
         try:
-            raw_method = block.find_value("_exptl.method").strip("'")
+            methods = [gemmi.cif.as_string(v).strip() for v in block.find_values("_exptl.method")]
         except Exception:
             pass
-        meta.method = raw_method
-        meta.method_category = _normalise_method(raw_method)
+        meta.method = "; ".join(m for m in methods if m)
+        categories = [_normalise_method(m) for m in methods]
+        known = [c for c in categories if c in _METHOD_MAP.values()]
+        meta.method_category = known[0] if known else (categories[0] if categories else "")
         meta.resolution = _get_resolution(block, meta.method_category)
         meta.organism = _get_organism(block)
+        meta.deposition_date = _first_value(
+            block, "_pdbx_database_status.recvd_initial_deposition_date"
+        )
+        meta.release_date = _first_value(
+            block, "_pdbx_audit_revision_history.revision_date"
+        )
+        meta.title = _first_value(block, "_struct.title")
         meta.plddt_source_confirmed = None  # not applicable for experimental structures
 
         if meta.method_category == "NMR":
             meta.n_models = _get_nmr_model_count(block)
 
     try:
-        structure = gemmi.read_structure(file_path)
+        from src.parser import load_structure
+
+        # the parser's cached copy, with entities set up exactly as for the metrics
+        structure = load_structure(file_path)
         meta.n_residues = _count_residues(structure, model_idx, chain_id)
+        meta.n_polymer_chains = sum(
+            1 for chain in structure[model_idx] if len(chain.get_polymer()) > 0
+        )
     except Exception:
         pass
 
     return meta
 
 
-def plddt_on_matched_residues(
-    meta: StructureMetadata,
-    matched_indices: np.ndarray,
-) -> Optional[float]:
-    """
-    Return mean pLDDT restricted to the aligned (matched) residue positions.
-
-    This is more informative than the global mean because alignment typically
-    excludes disordered termini where pLDDT is lowest.  Low pLDDT in the
-    matched region is particularly relevant: it suggests the AI prediction is
-    uncertain precisely in the region being compared.
-
-    Parameters
-    ----
-    meta            : StructureMetadata with plddt_per_residue populated.
-    matched_indices : 1-D array of indices into the Cα array (val.idx_a or val.idx_b).
-
-    Returns
-    -------
-    Mean pLDDT over matched residues, or None if pLDDT is unavailable or unconfirmed.
-    """
-    if not meta.is_alphafold:
+def _of3_msa_depth(cif_path: str) -> Optional[int]:
+    """Sequences in the MSAs OpenFold3 was given, from OF3_<id>_provenance.json."""
+    prov_path = cif_path.replace(".cif", "_provenance.json")
+    try:
+        with open(prov_path, encoding="utf-8") as f:
+            depths = json.load(f).get("msa_n_sequences") or {}
+        return int(sum(depths.values())) if depths else None
+    except (OSError, ValueError, TypeError):
         return None
-    if meta.plddt_source_confirmed is False:
-        return None  # don't report unconfirmed values
-    if meta.plddt_per_residue is None:
-        return None
-
-    arr = np.array(meta.plddt_per_residue)
-    valid_idx = matched_indices[matched_indices < len(arr)]
-    if len(valid_idx) == 0:
-        return None
-    return float(np.mean(arr[valid_idx]))
